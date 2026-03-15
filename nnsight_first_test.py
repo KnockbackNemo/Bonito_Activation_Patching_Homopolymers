@@ -1,3 +1,6 @@
+# A first test to check if bonito and nnsight are compatible.
+# Just wraps and prints the model.
+
 import torch
 from bonito import util
 from nnsight import LanguageModel
