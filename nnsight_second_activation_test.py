@@ -19,7 +19,7 @@ model = NNsight(bonito_model._orig_mod) # Use unoptimized model to avoid conflic
 model_dtype = next(model.parameters()).dtype #torch.float16
 
 # print(dir(model))
-# print(model)
+print(model)
 
 
 clean_input = torch.randn(1, 1, 200).to(dtype=model_dtype)
@@ -37,8 +37,7 @@ with model.trace(corrupted_input):
     patched_output = model.output.save()
 
 
-# print("Clean Activation: ", clean_activation)
-# print("Clean Output: ", clean_output)
-# print("Corrupted Output: ", corrupted_output)
-# print("Patched Output: ", patched_output)
-print("Shape: ", clean_output.shape)
+print("Clean Activation: ", clean_activation)
+print("Clean Output: ", clean_output)
+print("Corrupted Output: ", corrupted_output)
+print("Patched Output: ", patched_output)
