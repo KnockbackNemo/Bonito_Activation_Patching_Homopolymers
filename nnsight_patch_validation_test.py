@@ -5,6 +5,7 @@
 # ooh i want to see torchinfo summary
 
 import torch
+import os
 from bonito import util
 from nnsight import NNsight
 
@@ -25,24 +26,37 @@ model = NNsight(bonito_model._orig_mod) # Use unoptimized model to avoid conflic
 model_dtype = next(model.parameters()).dtype #torch.float16
 
 # print(dir(model))
-print(model.config)
+# print(model.config)
 
+A = 103 # pA
+C = 84
+G = 122
+T = 70 # Provided by Gemini based on ONT Technical posters and dorado files which apparently exist but which I haven't found #TODO check this
+
+# Arbitrary length + model standardization numbers from config
 LENGTH = 200
 HALF = int(LENGTH/2)
 STND_MEAN = 93.69239463939118
 STND_DEV = 23.506745239082388
 
+# Create normalized values from picoAmp fake values
 def standardize(x):
     return (x - STND_MEAN) / STND_DEV
 
+STD_A = standardize(A)
+STD_C = standardize(C)
+STD_G = standardize(G)
 
-clean_input = torch.zeros(LENGTH).to(dtype=model_dtype)
-clean_input[:HALF] = 0.8
-clean_input[HALF:] = 1.2
-corrupted_input = clean_input.to(dtype=model_dtype) # Do I need .to here again?
-corrupted_input[:HALF] = 1.8
-corrupted_input[HALF:] = 1.3
+# Make clean and corrupted input tensors
+clean_input = torch.zeros(1, 1, LENGTH).to(dtype=model_dtype)
+clean_input[..., :HALF] = STD_A
+clean_input[..., HALF:] = STD_C
+corrupted_input = clean_input.clone()
+corrupted_input[..., HALF:] = STD_G
 
+# Add some noise to look less suspicious?
+
+# Let's see if the output suggests A->C and A->G homopolymers
 with model.trace(clean_input):
     clean_activation = model.encoder.transformer_encoder[0].output[0].save()
     clean_output = model.output.save()
@@ -55,7 +69,16 @@ with model.trace(corrupted_input):
     patched_output = model.output.save()
 
 
-print("Clean Activation: ", clean_activation)
-print("Clean Output: ", clean_output)
-print("Corrupted Output: ", corrupted_output)
-print("Patched Output: ", patched_output)
+# print("Clean Activation: ", clean_activation)
+# print("Clean Output: ", clean_output)
+# print("Corrupted Output: ", corrupted_output)
+# print("Patched Output: ", patched_output)
+
+file_name, extension = os.path.splitext(__file__)
+
+torch.set_printoptions(profile="full") # See whole output
+with open(f"{file_name}_output.txt", "w") as f:
+    print(f"Output shape: {clean_output.shape}", file=f)
+    print(f"Clean Output: {clean_output}", file=f)
+    print(f"Corrupted Output: {corrupted_output}", file=f)
+    print(f"Patched Output: {patched_output}", file=f)
