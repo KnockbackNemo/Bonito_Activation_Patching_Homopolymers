@@ -6,3 +6,5 @@
  4^5 * 5 = 5120
 
  Okay, how do I know which of the 5120 corresponds to what?
+
+ Actually I think calling viterbi to see if the output even makes sense is probably a good idea.

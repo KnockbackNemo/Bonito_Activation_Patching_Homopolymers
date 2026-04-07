@@ -6,6 +6,7 @@
 
 import torch
 import os
+import matplotlib.pyplot as plt
 from bonito import util
 from nnsight import NNsight
 
@@ -24,6 +25,7 @@ bonito_model = util.load_model(model_path, device="cuda" if torch.cuda.is_availa
 
 model = NNsight(bonito_model._orig_mod) # Use unoptimized model to avoid conflicts with dynamo
 model_dtype = next(model.parameters()).dtype #torch.float16
+#print(model_dtype)
 
 # print(dir(model))
 # print(model.config)
@@ -34,7 +36,7 @@ G = 122
 T = 70 # Provided by Gemini based on ONT Technical posters and dorado files which apparently exist but which I haven't found #TODO check this
 
 # Arbitrary length + model standardization numbers from config
-LENGTH = 200
+LENGTH = 1000
 HALF = int(LENGTH/2)
 STND_MEAN = 93.69239463939118
 STND_DEV = 23.506745239082388
@@ -46,6 +48,7 @@ def standardize(x):
 STD_A = standardize(A)
 STD_C = standardize(C)
 STD_G = standardize(G)
+breakpoint()
 
 # Make clean and corrupted input tensors
 clean_input = torch.zeros(1, 1, LENGTH).to(dtype=model_dtype)
@@ -55,6 +58,8 @@ corrupted_input = clean_input.clone()
 corrupted_input[..., HALF:] = STD_G
 
 # Add some noise to look less suspicious?
+clean_input += torch.randn_like(clean_input) * 0.1 # Small amount of noise
+corrupted_input += torch.randn_like(corrupted_input) * 0.1
 
 # Let's see if the output suggests A->C and A->G homopolymers
 with model.trace(clean_input):
@@ -74,6 +79,8 @@ with model.trace(corrupted_input):
 # print("Corrupted Output: ", corrupted_output)
 # print("Patched Output: ", patched_output)
 
+
+
 file_name, extension = os.path.splitext(__file__)
 
 torch.set_printoptions(profile="full") # See whole output
@@ -82,3 +89,62 @@ with open(f"{file_name}_output.txt", "w") as f:
     print(f"Clean Output: {clean_output}", file=f)
     print(f"Corrupted Output: {corrupted_output}", file=f)
     print(f"Patched Output: {patched_output}", file=f)
+
+
+### Check the string output to make sure the basecalls at least make sense ###
+# model_outputs = {"clean_output" : clean_output, "corrupted_output" : corrupted_output, "patched_output" : patched_output}
+# paths = {}
+# strings = {}
+# for name, output in model_outputs.items():
+#     paths[name] = model.seqdist.viterbi(output.to(dtype=torch.float32)).cpu().numpy()
+#     strings[name] = model.seqdist.path_to_str(paths[name])
+
+# path_clean = model.seqdist.viterbi(clean_output.to(dtype=torch.float32)) #  Only float32 supported
+# path_corrupted = model.seqdist.viterbi(corrupted_output.to(dtype=torch.float32))
+# path_patched = model.seqdist.viterbi(patched_output.to(dtype=torch.float32))
+
+# path_clean_numpy = path_clean.cpu().numpy()
+# path_corrupted_numpy = path_corrupted.cpu().numpy()
+# path_patched_numpy = path_patched.cpu().numpy()
+
+string_clean = bonito_model.decode(clean_output[:, 0, :]) # Need to convert to a numpy array in memory
+string_corrupted = bonito_model.decode(corrupted_output[:, 0, :]) 
+string_patched = bonito_model.decode(patched_output[:, 0, :]) 
+
+
+
+### I want to see some output change!
+### TODO Note that I'm not sure what exactly each part of the output means still.
+
+# Let's just look at the mean transition scores for A, C, G, and T
+
+# reshaped_output
+# Reshape the output to (Timesteps, Batch, States, Transitions)
+# output_tensor shape is [34, 1, 5120]
+reshaped_clean_output = clean_output.view(-1, 1, 1024, 5)
+reshaped_corrupted_output = corrupted_output.view(-1, 1, 1024, 5)
+reshaped_patched_output = patched_output.view(-1, 1, 1024, 5)
+
+# Example: Get the scores for all 1024 states at the 15th timestep
+# Each row is [Blank, A, C, G, T]
+mean_scores_clean = torch.mean(reshaped_clean_output, dim=2) # Squish all transitions together
+mean_scores_corrupted = torch.mean(reshaped_corrupted_output, dim=2) # Squish all transitions together
+mean_scores_patched = torch.mean(reshaped_patched_output, dim=2) # Squish all transitions together
+
+
+with open(f"{file_name}_strings.txt", "w") as f:
+    print(f"Clean output string: {string_clean}", file=f)
+    print(f"Corrupted output string: {string_corrupted}", file=f)
+    print(f"Patched output string: {string_patched}", file=f)
+
+    print(f"Mean Clean Output: {mean_scores_clean}", file=f)
+    print(f"Mean Corrupted Output: {mean_scores_corrupted}", file=f)
+    print(f"Mean Patched Output: {mean_scores_patched}", file=f)
+
+
+
+# If you want to see the score for transitioning to 'G' from all states:
+# g_scores = timestep_15_scores[:, 3]
+# clean_output_mean_scores = clean_output
+
+## Patch each layer in turn and see what happens
