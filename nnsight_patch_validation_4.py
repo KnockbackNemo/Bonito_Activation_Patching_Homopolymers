@@ -68,7 +68,7 @@ def time_to_output_idx(x) -> int:
     return x // 6 # CNN has stride of 3, 2, and 2, linear upsample has scale factor of 2
 
 def time_to_transformer_idx(x) -> int:
-    return x // 6 # CNN has stride of 3, 2, and 2, linear upsample has scale factor of 2
+    return x // 12 # CNN has stride of 3, 2, and 2
 
 # Make fake signal spike
 REPLACE_START = 130
