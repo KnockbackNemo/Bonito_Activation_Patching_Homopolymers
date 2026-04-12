@@ -101,8 +101,8 @@ del corrupted_output_proxy
 
 # Calculate baseline MSE at the time
 TIME_WINDOW_BUF = 10
-score_window_start_idx = time_to_output_idx(REPLACE_START - 10)
-score_window_end_idx : int= time_to_output_idx(REPLACE_START + 10)
+score_window_start_idx = time_to_output_idx(0) # REPLACE_START - 10
+score_window_end_idx : int= time_to_output_idx(250) # REPLACE_START + 10
 score_window_clean = clean_output[int(score_window_start_idx): int(score_window_end_idx)] # For some reason just making the variables ints in their type doesn't work?
 score_window_corrupted = corrupted_output[int(score_window_start_idx):int(score_window_end_idx)]
 score_str_clean = bonito_model.decode(score_window_clean[:, 0, :])
