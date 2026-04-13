@@ -1,6 +1,4 @@
-# The goal of this file is to look for the place where a spike in the signal is found
-# as a proof of concept
-
+# The goal of this file is to run a test but with more metrics - and more inputs. Ideally, this will loop over multiple inputs in a folder and then print metrics for them.
 
 import torch
 import os
@@ -13,6 +11,18 @@ from bonito import util
 from bonito import util
 from bonito.reader import Reader, read_chunks
 from nnsight import NNsight
+
+# Some data structure # Holds the logits for each base at each timeslice for each layer for a single read
+##############################
+##### HELPER FUNCTIONS #######
+##############################
+
+# def save_timeslice_data(): Let me skip this for now- I think I'm trying to optimize too soon
+#     ''' Compute the following metrics:
+#         - The logits of each state (N, A, C, G, T) (can be used to get logit difference later)
+#         - (This is summed across all states)
+#         - Plus the 
+#     '''
 
 ##############################
 ######## MODEL SETUP #########
@@ -32,16 +42,16 @@ bonito_model = util.load_model(model_path, device="cuda" if torch.cuda.is_availa
 
 model = NNsight(bonito_model._orig_mod) # Use unoptimized model to avoid conflicts with dynamo
 model_dtype = next(model.parameters()).dtype #torch.float16
-#print(model_dtype)
+
 
 
 ##############################
-######## DATA CREATION #######
+######## DATA CREATION ####### #TODO: We will want to load in reads generated from somewhere else instead probably
 ##############################
 
 
 # Load in data
-data_dir = "./data/reads/"
+data_dir = "../data/reads/"
 
 reader = Reader(data_dir)
 
@@ -100,27 +110,33 @@ corrupted_output = corrupted_output_proxy.detach()
 del corrupted_output_proxy
 
 # Calculate baseline MSE at the time
-TIME_WINDOW_BUF = 10
-score_window_start_idx = time_to_output_idx(0) # REPLACE_START - 10
-score_window_end_idx : int= time_to_output_idx(250) # REPLACE_START + 10
-score_window_clean = clean_output[int(score_window_start_idx): int(score_window_end_idx)] # For some reason just making the variables ints in their type doesn't work?
-score_window_corrupted = corrupted_output[int(score_window_start_idx):int(score_window_end_idx)]
-score_str_clean = bonito_model.decode(score_window_clean[:, 0, :])
-score_str_corrupted = bonito_model.decode(score_window_corrupted[:, 0, :])
-print(f"Clean window str: {score_str_clean}")
-print(f"Corrupted window str: {score_str_corrupted}")
+# The homopolymer we want has Cs starting at 14, 15, 16, 20, and 22 with the next A starting at 24 and ending at 26
+# Format of the scores is [timesteps, batch, transitions]
+score_window_start_idx = 24 # REPLACE_START - 10 # I think this is the wrong index
+score_window_end_idx : 25
+INDEX_C = 2
+INDEX_BLANK = 0
 
-baseline_diff = torch.nn.functional.mse_loss(score_window_corrupted.to(torch.float32), score_window_clean.to(torch.float32)).item()
+logit_diff_clean = clean_output[score_window_start_idx, 0, INDEX_C] - clean_output[score_window_start_idx, 0, INDEX_BLANK]
+logit_diff_corrupt = corrupted_output[score_window_start_idx, 0, INDEX_C] - corrupted_output[score_window_start_idx, 0, INDEX_BLANK]
+
+baseline_diff = torch.nn.functional.mse_loss(logit_diff_clean.to(torch.float32), logit_diff_corrupt.to(torch.float32)).item()
 print(f"baseline diff: {baseline_diff}")
+
+##############################
+###### PATCHING SWEEP ########
+##############################
 
 # Run sweep of all layers using a timestep of 1
 NUM_T_LAYERS = 18
-SWEEP_WINDOW_START = REPLACE_START - 10 # 10 timestamps before spike
-SWEEP_WINDOW_END = REPLACE_START + steal_base_len + 10 # 10 timestamps after end of spike
+SWEEP_WINDOW_START = 0#time_to_transformer_idx(REPLACE_START - 30) # 30 timestamps before spike
+SWEEP_WINDOW_END = time_to_transformer_idx(LENGTH)#REPLACE_START + steal_base_len + 30) # 30 timestamps after end of spike
 
 NUM_TIMESTEP_SWEEPS = int((SWEEP_WINDOW_END - SWEEP_WINDOW_START) / 1) # TODO Later: divide by timestep patch size
 heatmap_data = np.zeros((NUM_T_LAYERS, NUM_TIMESTEP_SWEEPS))
 patching_strings = {}
+
+# Logit difference timestep constants
 
 for layer_idx in range(NUM_T_LAYERS):
     print(f"Sweeping layer {layer_idx}")
@@ -131,20 +147,17 @@ for layer_idx in range(NUM_T_LAYERS):
     del clean_activation_proxy
 
     for time_offset, t in enumerate(range(SWEEP_WINDOW_START, SWEEP_WINDOW_END)):
-        print(f"Sweeping timestep {t} : {time_offset} -> {time_to_output_idx(t)}")
-    
-        trans_t = time_to_transformer_idx(t)
+        print(f"Sweeping transformer timestep {t} : offset {time_offset} -> output {2*t}")
 
         with model.trace(corrupted_input):
             print(f"Shape: {clean_activation.shape}")
-            model.encoder.transformer_encoder[layer_idx].output[0][trans_t:trans_t+1, :] = clean_activation[trans_t:trans_t+1, :]
+            model.encoder.transformer_encoder[layer_idx].output[0][t-1:t+2, :] = clean_activation[t-1:t+2, :]
             patched_scores_proxy = model.output.save()
 
         patched_scores = patched_scores_proxy.detach()
 
-        score_window_clean = clean_output[score_window_start_idx:score_window_end_idx]
-        score_window_corrupted = patched_scores[score_window_start_idx:score_window_end_idx]
-        patched_diff = torch.nn.functional.mse_loss(score_window_corrupted.to(torch.float32), score_window_clean.to(torch.float32)).item()
+        patched_logit_diff = patched_scores[score_window_start_idx, 0, INDEX_C] - patched_scores[score_window_start_idx, 0, INDEX_BLANK]
+        patched_diff = torch.nn.functional.mse_loss(logit_diff_clean.to(torch.float32), patched_logit_diff.to(torch.float32)).item()
 
         recovery_score = 1.0 - (patched_diff / baseline_diff)
 

@@ -32,7 +32,7 @@ model_dtype = next(model.parameters()).dtype #torch.float16
 ##############################
 
 # Load in data
-data_dir = "./data/reads/"
+data_dir = "../data/reads/"
 
 reader = Reader(data_dir)
 
@@ -48,8 +48,8 @@ first_read = next(reads)
 
 
 # Chop data
-start_idx = 54500 # Skip beginning noise 53000
-LENGTH = 400 # Somewhere in here is a nice C 5-mer string
+start_idx = 54250 # Skip beginning noise 53000
+LENGTH = 250 # Somewhere in here is a nice C 5-mer string
 end_idx = start_idx + LENGTH
 raw_stndrd_signal = first_read.signal
 chopped_signal = raw_stndrd_signal[start_idx:end_idx]
