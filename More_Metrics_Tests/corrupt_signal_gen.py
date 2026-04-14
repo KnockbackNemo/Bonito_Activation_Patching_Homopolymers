@@ -1,8 +1,12 @@
+# This script reads in a signal and produces a corrupted signal
+# Plots both signals and the string so we can see it, and
+# Saves the data as an array so other scripts can use them.
+
 # This file takes in a read and prints out the timestamps for each base
 
 import os
-import pod5
 import torch
+import matplotlib as plt
 import pandas as pd
 from bonito import util
 from bonito.reader import Reader, read_chunks
@@ -54,14 +58,38 @@ for i in range(1,NUM_READ):
 
 raw_stndrd_signal = first_read.signal
 
-# Chop data
-MAX_LENGTH = 500_000
-LENGTH = min(MAX_LENGTH, len(raw_stndrd_signal))
+# Chop data 
+# ##############
+# # THIS IS WHERE THE FOUND KMER PARAMS COME IN
+# ##############
+RAW_START =
+INPUT_LENGTH = 
+INPUT_BEGIN_PADDING_LENGTH = 80
+INPUT_END_PADDING_LENGTH = 40
+EXTEND = 1 # 1 for extend by 1, 0 for shorten by 1
+SECOND_TO_LAST_HMER_TOK_START = 
+LAST_HMER_TOK_START =
+NEXT_TOK_START = 
 print(f"Length: {LENGTH} for read")
 
-raw_stndrd_signal = raw_stndrd_signal[:LENGTH]
-
+# Chop out a window around the desired signal
+raw_stndrd_signal = raw_stndrd_signal[RAW_START - INPUT_BEGIN_PADDING_LENGTH:RAW_START + INPUT_LENGTH + INPUT_END_PADDING_LENGTH]
 input = torch.tensor(raw_stndrd_signal, dtype=model_dtype).view(1, 1, LENGTH).to("cuda" if torch.cuda.is_available() else "cpu")
+
+# Make a corrupt signal that pastes the token over last homopolymer or extends the second to last homopolymer token out
+corrupt_input = input.copy()
+if EXTEND: # Turn CGAAA*AAT*TC into CGAAAA*AAT*C #TODO I actually need to know when the next token ends... I think.? Or we say we don't really care if we corrupt the string afterwards and just paste a few ticks in. We can't be all that precise here anyways.
+    signal_to_cpy = input[SECOND_TO_LAST_HMER_TOK_START:NEXT_TOK_START + 15] #10-15 is about the length of one base
+    corrupt_input[LAST_HMER_TOK_START:LAST_HMER_TOK_START + len(signal_to_cpy)] = signal_to_cpy
+else: # Shorten string
+    signal_to_cpy = input[LAST_HMER_TOK_START:NEXT_TOK_START + 15] #10-15 is about the length of one base
+    corrupt_input[SECOND_TO_LAST_HMER_TOK_START:SECOND_TO_LAST_HMER_TOK_START + len(signal_to_cpy)] = signal_to_cpy
+
+# Check signal
+plt.figure()
+plt.plot(input, label="Clean signal", color='blue')
+plt.plot(corrupt_input, label="Corrupted signal", color='red')
+plt.show()
 
 with torch.no_grad():
     output = bonito_model(input)
@@ -90,18 +118,11 @@ K_MIN = 4 # We'll save homopolymers of 4 or more bases
 
 
 v_path_list = v_path.flatten().tolist()
-v_path_list.append(-1)
-
-last_state = -1
-records = [] # Save all data
-slice_timestamp_start = 0
-slice_length = 0
-kmer_stamps_input = [] # Save each homopolymer timestamp
 
 
-# for i, state in enumerate(v_path_list):
-#     if state != 0 and state != len(v_path_list) - 1:
-#         print(f"{alphabet[state]}", end="")
+for i, state in enumerate(v_path_list):
+    if state != 0 and state != len(v_path_list) - 1:
+        print(f"{alphabet[state]}", end="")
 
 # Iterate through all bases. For each one, keep track of the last base and slide a window to count the length of the homopolymer    
 for t, current_state in enumerate(v_path_list):
