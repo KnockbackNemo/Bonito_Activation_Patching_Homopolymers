@@ -47,7 +47,7 @@ reads = reader.get_reads(
 # Grab the very first read
 first_read = next(reads)
 
-NUM_READ = 8 # Change this to get a different read in the POD5 file
+NUM_READ = 1 # Change this to get a different read in the POD5 file
 
 for i in range(1,NUM_READ):
     first_read = next(reads)
@@ -120,7 +120,8 @@ for t, current_state in enumerate(v_path_list):
     
             
             # Save slice_timestamp_start, t, length (time), # bases, base, kmer_stamps
-            records.append({'base' : base,
+            records.append({'read_num' : NUM_READ,
+                            'base' : base,
                             'num_bases' : slice_length,
                             'duration_viterbi' : (t - slice_timestamp_start),
                             'raw start idx' : output_to_abs_in_idx(slice_timestamp_start),

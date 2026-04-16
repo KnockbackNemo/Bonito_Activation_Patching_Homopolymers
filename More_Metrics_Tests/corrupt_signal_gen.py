@@ -48,7 +48,7 @@ data_dir = "../data/reads/"
 read_list_csv = "./kmers_reads.csv" # Change this to the name of the csv
 
 #### Name of file for output read requests ####
-read_requests_name = "read_requests_list.csv"
+read_requests_name = "read_requests_list"
 
 
 # Lines come from find_kmers and have the format
@@ -60,7 +60,7 @@ print(reads_df)
 
 requests_output_df = reads_df.copy()
 
-for col in ['clean_data', 'clean_str', 'corrupt_extended_data', 'corrupt_str_extend', 'corrupt_shortened_data', 'corrupt_str_shortened']:
+for col in ['clean_str', 'clean_str_decode', 'corrupt_str_extended', 'corrupt_str_extended_decode', 'corrupt_str_shortened', 'corrupt_str_shortened_decode', 'clean_data', 'corrupt_extended_data',  'corrupt_shortened_data']:
     requests_output_df[col] = None
     requests_output_df[col] = requests_output_df[col].astype('object')
 
@@ -80,6 +80,9 @@ read_line = 0 # For moving through the list of kmers in this read we want
 
 # Iterate through the reads in the POD5 file - the order should ascend with the read_line read_num
 for num_read in range(1, highest_read + 1): # highest_read = 2 means run this twice
+
+    if read_line >= len(reads_df):
+            break
    
     # Grab the very first read
     read = next(reads)
@@ -134,6 +137,7 @@ for num_read in range(1, highest_read + 1): # highest_read = 2 means run this tw
         # Save clean data
         requests_output_df.at[read_line, 'clean_data'] = input
         requests_output_df.at[read_line, 'clean_str'] = str_clean
+        requests_output_df.at[read_line, 'clean_str_decode'] = bonito_model.decode(clean_output[:, 0, :])
         
         # Do both a shorten run (1) and extend run (1) for each read request
         for extend in range(0, 2): 
@@ -150,23 +154,23 @@ for num_read in range(1, highest_read + 1): # highest_read = 2 means run this tw
                 corrupt_input[0, 0, - shift_dist :] = 0.0
 
 
-            # Cross-fade smoothing
-            fade_len = 3
-            if fade_len < shift_dist:
-                alpha = torch.linspace(0, 1, fade_len, device=input.device)
-                splice_point = last_hmer_tok_start if extend else second_to_last_hmer_tok_start
+            # # Cross-fade smoothing
+            # fade_len = 3
+            # if fade_len < shift_dist:
+            #     alpha = torch.linspace(0, 1, fade_len, device=input.device)
+            #     splice_point = last_hmer_tok_start if extend else second_to_last_hmer_tok_start
                 
-                left_edge = input[0, 0, splice_point - fade_len : splice_point]
-                right_edge = corrupt_input[0, 0, splice_point]
-                corrupt_input[0, 0, splice_point - fade_len : splice_point] = (1 - alpha) * left_edge + alpha * right_edge
+            #     left_edge = input[0, 0, splice_point - fade_len : splice_point]
+            #     right_edge = corrupt_input[0, 0, splice_point]
+            #     corrupt_input[0, 0, splice_point - fade_len : splice_point] = (1 - alpha) * left_edge + alpha * right_edge
 
-                # Check signal
-                plt.figure()
-                plt.plot(input.cpu()[0, 0, :], label="Clean signal", color='blue')
-                plt.plot(corrupt_input.cpu()[0, 0, :], label="Corrupted signal", color='red')
-                plt.title('Read ' + str(num_read) + ' request ' + str(chop_request))
-                plt.savefig(f"plots/read_{num_read} line {read_line} extend={extend}.png")
-                plt.close()
+            # Check signal
+            plt.figure()
+            plt.plot(input.cpu()[0, 0, :], label="Clean signal", color='blue')
+            plt.plot(corrupt_input.cpu()[0, 0, :], label="Corrupted signal", color='red')
+            plt.title('Read ' + str(num_read) + ' request ' + str(chop_request))
+            plt.savefig(f"plots/read_{num_read} line {read_line} extend={extend}.png")
+            plt.close()
 
             # Run model and get string for corrupt signal      
             with torch.no_grad():
@@ -192,10 +196,12 @@ for num_read in range(1, highest_read + 1): # highest_read = 2 means run this tw
             # Save string and signal data to the dataframe
             if extend:
                 requests_output_df.at[read_line, 'corrupt_extended_data'] = corrupt_input
-                requests_output_df.at[read_line, 'corrupt_str_extend'] = str_corrupt
+                requests_output_df.at[read_line, 'corrupt_str_extended'] = str_corrupt
+                requests_output_df.at[read_line, 'corrupt_str_extended_decode'] = bonito_model.decode(corrupt_output[:, 0, :])
             else:
                 requests_output_df.at[read_line, 'corrupt_shortened_data'] = corrupt_input
                 requests_output_df.at[read_line, 'corrupt_str_shortened'] = str_corrupt
+                requests_output_df.at[read_line, 'corrupt_str_shortened_decode'] = bonito_model.decode(corrupt_output[:, 0, :])
 
         # Move to the next read request
         read_line += 1
@@ -207,8 +213,14 @@ for num_read in range(1, highest_read + 1): # highest_read = 2 means run this tw
 
 # Save the dataframe to a csv (for reading) and pickle file (for loading)
 if not requests_output_df.empty:
-    requests_output_df.to_csv(read_requests_name + '.csv', index=False)
-    requests_output_df.to_pickle(read_requests_name + '.pkl')
+    
+    # Make and save dataframe for csv (exclude signal data)
+    requests_output_df_csv = requests_output_df.copy()
+    requests_output_df_csv = requests_output_df_csv.drop(columns=['clean_data', 'corrupt_extended_data', 'corrupt_shortened_data'])
+    requests_output_df_csv.to_csv(read_requests_name + ".csv", index=False)
+    
+    # Save the full dataframe as a .pkl
+    requests_output_df.to_pickle(read_requests_name + ".pkl")
     print(f"saved to {read_requests_name}.csv and .pkl")
 else:
     print("Failed - reads list is empty")
