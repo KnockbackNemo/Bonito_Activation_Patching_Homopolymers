@@ -27,7 +27,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="torch.nn.attenti
 
 model_path = "dna_r10.4.1_e8.2_400bps_sup@v5.2.0"
 
-bonito_model = util.load_model(model_path, device="cuda" if torch.cuda.is_available() else "cpu") # Will eventually run this on LRC machines- may have gpus?
+bonito_model = util.load_model(model_path, device="cuda" if torch.cuda.is_available() else "cpu") 
 
 model = NNsight(bonito_model._orig_mod) # Use unoptimized model to avoid conflicts with dynamo
 model_dtype = next(model.parameters()).dtype #torch.float16
@@ -101,20 +101,11 @@ del corrupted_output_proxy
 # Calculate baseline MSE at the time
 # The homopolymer we want has Cs starting at 14, 15, 16, 20, and 22 with the next A starting at 24 and ending at 26
 # Format of the scores is [timesteps, batch, transitions]
-score_window_start_idx = 24 #REPLACE_START - 10 # I think this is the wrong index
+score_window_start_idx = 23 #REPLACE_START - 10 # I think this is the wrong index
 score_window_end_idx = 25
 INDEX_C = 2
 INDEX_BLANK = 0
 
-logit_diff_clean = clean_output[score_window_start_idx, 0, INDEX_C] - clean_output[score_window_start_idx, 0, INDEX_BLANK]
-logit_diff_corrupt = corrupted_output[score_window_start_idx, 0, INDEX_C] - corrupted_output[score_window_start_idx, 0, INDEX_BLANK]
-
-baseline_diff = torch.nn.functional.mse_loss(logit_diff_clean.to(torch.float32), logit_diff_corrupt.to(torch.float32)).item()
-print(f"baseline diff: {baseline_diff}")
-
-##############################
-###### PATCHING SWEEP ########
-##############################
 
 # Run sweep of all layers using a timestep of 1
 NUM_T_LAYERS = 18
@@ -122,10 +113,43 @@ SWEEP_WINDOW_START = 0#time_to_transformer_idx(REPLACE_START - 30) # 30 timestam
 SWEEP_WINDOW_END = time_to_transformer_idx(LENGTH)#REPLACE_START + steal_base_len + 30) # 30 timestamps after end of spike
 
 NUM_TIMESTEP_SWEEPS = int((SWEEP_WINDOW_END - SWEEP_WINDOW_START) / 1) # TODO Later: divide by timestep patch size
-heatmap_data = np.zeros((NUM_T_LAYERS, NUM_TIMESTEP_SWEEPS))
+
+
+# Metrics to look at:
+# Correct transition vs wrong transition
+# Sum of C states - sum of blank states
+# later - Sum of A states?
+#       - Sum of blank states?
+###### Things because I can't think right now but I 100% need to fix this (hardcode 22-24)
+TARGET_TRANSITIONS = [torch.argmax(clean_output[22, 0, :]).item(), torch.argmax(clean_output[23, 0, :]).item(), torch.argmax(clean_output[24, 0, :]).item()]
+
+WRONG_TRANSITIONS = [torch.argmax(corrupted_output[22, 0, :]).item(), torch.argmax(corrupted_output[23, 0, :]).item(), torch.argmax(corrupted_output[24, 0, :]).item()]
+
+# heatmap_data_sum_diff_23 = np.zeros((NUM_T_LAYERS, NUM_TIMESTEP_SWEEPS)) # test all three
+# heatmap_data_sum_diff_24 = np.zeros((NUM_T_LAYERS, NUM_TIMESTEP_SWEEPS))
+# heatmap_data_sum_diff_22 = np.zeros((NUM_T_LAYERS, NUM_TIMESTEP_SWEEPS))
+heatmap_data_argmax_diffs = [np.zeros((NUM_T_LAYERS, NUM_TIMESTEP_SWEEPS)), np.zeros((NUM_T_LAYERS, NUM_TIMESTEP_SWEEPS)), np.zeros((NUM_T_LAYERS, NUM_TIMESTEP_SWEEPS))]
+
 patching_strings = {}
+######################################################################
 
 # Logit difference timestep constants
+logit_diffs_clean= []
+logit_diffs_corrupt= []
+for i in range(0, len(heatmap_data_argmax_diffs[0])):
+    logit_diffs_clean.append(clean_output[22 + i, 0, TARGET_TRANSITIONS[i]] - clean_output[22 + i, 0, WRONG_TRANSITIONS[i]])
+    logit_diffs_corrupt.append(corrupted_output[22 + i, 0, TARGET_TRANSITIONS[i]] - corrupted_output[22 + i, 0, WRONG_TRANSITIONS[i]])
+
+baseline_diffs = []
+for i in range(0, len(heatmap_data_argmax_diffs[0])): # Positive if clean is closer to the target than wrong, negative if corrupt is closer to target than wrong, 0 if same
+    baseline_diffs.append(logit_diffs_clean[i].to(torch.float32) - logit_diffs_corrupt[i].to(torch.float32))
+print(f"Output shape: {clean_output.shape()}")
+print(f"baseline diff: {baseline_diffs}")
+
+##############################
+###### PATCHING SWEEP ########
+##############################
+
 
 for layer_idx in range(NUM_T_LAYERS):
     print(f"Sweeping layer {layer_idx}")
@@ -139,36 +163,47 @@ for layer_idx in range(NUM_T_LAYERS):
         print(f"Sweeping transformer timestep {t} : offset {time_offset} -> output {2*t}")
 
         with model.trace(corrupted_input):
-            print(f"Shape: {clean_activation.shape}")
+            # print(f"Shape: {clean_activation.shape}")
             model.encoder.transformer_encoder[layer_idx].output[0][t-1:t+2, :] = clean_activation[t-1:t+2, :]
             patched_scores_proxy = model.output.save()
 
         patched_scores = patched_scores_proxy.detach()
 
-        patched_logit_diff = patched_scores[score_window_start_idx, 0, INDEX_C] - patched_scores[score_window_start_idx, 0, INDEX_BLANK]
-        patched_diff = torch.nn.functional.mse_loss(logit_diff_clean.to(torch.float32), patched_logit_diff.to(torch.float32)).item()
+        # This is higher if C is more likely
+        patched_logit_diffs = []
+        recovery_scores = []
 
-        recovery_score = 1.0 - (patched_diff / baseline_diff)
+        for i in range(0, len(heatmap_data_argmax_diffs[0])): #TODO: Make this not all dependent on the heatmap arg
+            patched_logit_diffs.append(patched_scores[22 + i, 0, TARGET_TRANSITIONS[i]] - patched_scores[22 + i, 0, WRONG_TRANSITIONS[i]])
+        
+        
+        # = patched_scores[score_window_start_idx, 0, INDEX_C] - patched_scores[score_window_start_idx, 0, INDEX_BLANK]
+        # patched_diff = logit_diff_clean.to(torch.float32) - patched_logit_diff.to(torch.float32)
 
-        heatmap_data[layer_idx, time_offset] = recovery_score
+        for i in range(0, len(heatmap_data_argmax_diffs[0])): # 0 if patched diff = baseline between clean and corrupt, 1 if patched = clean 
+            recovery_scores.append(1 - (logit_diffs_clean[i].to(torch.float32) - patched_logit_diffs[i].to(torch.float32))/baseline_diffs[i])
+            heatmap_data_argmax_diffs[i, layer_idx, time_offset] = recovery_scores[i]
+
+
         patching_strings[(layer_idx, time_offset)] = bonito_model.decode(patched_scores[:, 0, :].to(torch.float32) )
 
         del patched_scores_proxy
         del patched_scores
         
     del clean_activation
-    gc.collect() #TODO  What does this do
-    torch.cuda.empty_cache() #TODO and what happens if I don't run these lines?
+    gc.collect() 
+    torch.cuda.empty_cache()
 
-# Plot results
-plt.figure()
-sns.heatmap(heatmap_data)
-plt.savefig("heatmap_results.png")
-np.save("heatmap_data.npy", heatmap_data)
 
 # Write data to a file
 file_name, extension = os.path.splitext(__file__)
 
+# Plot results
+for i in range(0, 3):
+    plt.figure()
+    sns.heatmap(heatmap_data_argmax_diffs[i])
+    plt.savefig(f"{file_name}_heatmap_results_{22 + i}.png")
+    np.save(f"{file_name}_heatmap_data_{22 + i}.npy", heatmap_data_argmax_diffs)
 
 
 string_clean = bonito_model.decode(clean_output[:, 0, :]) # Need to convert to a numpy array in memory
