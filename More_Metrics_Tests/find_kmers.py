@@ -120,11 +120,11 @@ for t, current_state in enumerate(v_path_list):
     
             
             # Save slice_timestamp_start, t, length (time), # bases, base, kmer_stamps
-            records.append({'base' : [base],
-                            'num_bases' : [slice_length],
-                            'duration_viterbi' : [(t - slice_timestamp_start)],
-                            'raw start idx' : [output_to_abs_in_idx(slice_timestamp_start)],
-                            'raw end idx' : [output_to_abs_in_idx(t)], # Start of next base; should be excluded
+            records.append({'base' : base,
+                            'num_bases' : slice_length,
+                            'duration_viterbi' : (t - slice_timestamp_start),
+                            'raw start idx' : output_to_abs_in_idx(slice_timestamp_start),
+                            'raw end idx' : output_to_abs_in_idx(t), # Start of next base; should be excluded
                             'input_base_timestamps' : list(kmer_stamps_input)
                             })
 
