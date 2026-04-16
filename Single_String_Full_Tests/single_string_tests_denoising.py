@@ -136,14 +136,14 @@ patching_strings = {}
 # Logit difference timestep constants
 logit_diffs_clean= []
 logit_diffs_corrupt= []
-for i in range(0, len(heatmap_data_argmax_diffs[0])):
+for i in range(0, len(TARGET_TRANSITIONS)):
     logit_diffs_clean.append(clean_output[22 + i, 0, TARGET_TRANSITIONS[i]] - clean_output[22 + i, 0, WRONG_TRANSITIONS[i]])
     logit_diffs_corrupt.append(corrupted_output[22 + i, 0, TARGET_TRANSITIONS[i]] - corrupted_output[22 + i, 0, WRONG_TRANSITIONS[i]])
 
 baseline_diffs = []
-for i in range(0, len(heatmap_data_argmax_diffs[0])): # Positive if clean is closer to the target than wrong, negative if corrupt is closer to target than wrong, 0 if same
+for i in range(0, len(TARGET_TRANSITIONS)): # Positive if clean is closer to the target than wrong, negative if corrupt is closer to target than wrong, 0 if same
     baseline_diffs.append(logit_diffs_clean[i].to(torch.float32) - logit_diffs_corrupt[i].to(torch.float32))
-print(f"Output shape: {clean_output.shape()}")
+print(f"Output shape: {clean_output.shape}")
 print(f"baseline diff: {baseline_diffs}")
 
 ##############################
@@ -173,16 +173,16 @@ for layer_idx in range(NUM_T_LAYERS):
         patched_logit_diffs = []
         recovery_scores = []
 
-        for i in range(0, len(heatmap_data_argmax_diffs[0])): #TODO: Make this not all dependent on the heatmap arg
+        for i in range(0, len(TARGET_TRANSITIONS)): #TODO: Make this not all dependent on the heatmap arg
             patched_logit_diffs.append(patched_scores[22 + i, 0, TARGET_TRANSITIONS[i]] - patched_scores[22 + i, 0, WRONG_TRANSITIONS[i]])
         
         
         # = patched_scores[score_window_start_idx, 0, INDEX_C] - patched_scores[score_window_start_idx, 0, INDEX_BLANK]
         # patched_diff = logit_diff_clean.to(torch.float32) - patched_logit_diff.to(torch.float32)
 
-        for i in range(0, len(heatmap_data_argmax_diffs[0])): # 0 if patched diff = baseline between clean and corrupt, 1 if patched = clean 
+        for i in range(0, len(TARGET_TRANSITIONS)): # 0 if patched diff = baseline between clean and corrupt, 1 if patched = clean 
             recovery_scores.append(1 - (logit_diffs_clean[i].to(torch.float32) - patched_logit_diffs[i].to(torch.float32))/baseline_diffs[i])
-            heatmap_data_argmax_diffs[i, layer_idx, time_offset] = recovery_scores[i]
+            heatmap_data_argmax_diffs[i][layer_idx, time_offset] = recovery_scores[i]
 
 
         patching_strings[(layer_idx, time_offset)] = bonito_model.decode(patched_scores[:, 0, :].to(torch.float32) )
@@ -199,11 +199,11 @@ for layer_idx in range(NUM_T_LAYERS):
 file_name, extension = os.path.splitext(__file__)
 
 # Plot results
-for i in range(0, 3):
+for i in range(0, len(TARGET_TRANSITIONS)):
     plt.figure()
     sns.heatmap(heatmap_data_argmax_diffs[i])
     plt.savefig(f"{file_name}_heatmap_results_{22 + i}.png")
-    np.save(f"{file_name}_heatmap_data_{22 + i}.npy", heatmap_data_argmax_diffs)
+    np.save(f"{file_name}_heatmap_data_{22 + i}.npy", heatmap_data_argmax_diffs[i])
 
 
 string_clean = bonito_model.decode(clean_output[:, 0, :]) # Need to convert to a numpy array in memory
@@ -220,5 +220,5 @@ with open(f"{file_name}_strings.txt", "w") as f:
     for layer_idx in range(NUM_T_LAYERS):
         print(f"--- Patched Strings for Layer {layer_idx} ---", file=f)
         for time_offset, t in enumerate(range(SWEEP_WINDOW_START, SWEEP_WINDOW_END)):
-            print(f"Time {time_offset} : {patching_strings[layer_idx, time_offset]} : score: {heatmap_data[layer_idx, time_offset]}", file=f)
+            print(f"Time {time_offset} : {patching_strings[layer_idx, time_offset]} : scores: {heatmap_data_argmax_diffs[0][layer_idx, time_offset]}, {heatmap_data_argmax_diffs[1][layer_idx, time_offset]}, {heatmap_data_argmax_diffs[2][layer_idx, time_offset]}", file=f)
 

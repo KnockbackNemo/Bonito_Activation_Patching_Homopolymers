@@ -106,16 +106,6 @@ score_window_end_idx = 25
 INDEX_C = 2
 INDEX_BLANK = 0
 
-logit_diff_clean = clean_output[score_window_start_idx, 0, INDEX_C] - clean_output[score_window_start_idx, 0, INDEX_BLANK]
-logit_diff_corrupt = corrupted_output[score_window_start_idx, 0, INDEX_C] - corrupted_output[score_window_start_idx, 0, INDEX_BLANK]
-
-baseline_diff = logit_diff_clean.to(torch.float32) - logit_diff_corrupt.to(torch.float32)
-print(f"Output shape: {clean_output.shape()}")
-print(f"baseline diff: {baseline_diff}")
-
-##############################
-###### PATCHING SWEEP ########
-##############################
 
 # Run sweep of all layers using a timestep of 1
 NUM_T_LAYERS = 18
@@ -123,42 +113,82 @@ SWEEP_WINDOW_START = 0#time_to_transformer_idx(REPLACE_START - 30) # 30 timestam
 SWEEP_WINDOW_END = time_to_transformer_idx(LENGTH)#REPLACE_START + steal_base_len + 30) # 30 timestamps after end of spike
 
 NUM_TIMESTEP_SWEEPS = int((SWEEP_WINDOW_END - SWEEP_WINDOW_START) / 1) # TODO Later: divide by timestep patch size
-heatmap_data = np.zeros((NUM_T_LAYERS, NUM_TIMESTEP_SWEEPS))
+
+
+# Metrics to look at:
+# Correct transition vs wrong transition
+# Sum of C states - sum of blank states
+# later - Sum of A states?
+#       - Sum of blank states?
+###### Things because I can't think right now but I 100% need to fix this (hardcode 22-24)
+TARGET_TRANSITIONS = [torch.argmax(clean_output[22, 0, :]).item(), torch.argmax(clean_output[23, 0, :]).item(), torch.argmax(clean_output[24, 0, :]).item()]
+
+WRONG_TRANSITIONS = [torch.argmax(corrupted_output[22, 0, :]).item(), torch.argmax(corrupted_output[23, 0, :]).item(), torch.argmax(corrupted_output[24, 0, :]).item()]
+
+# heatmap_data_sum_diff_23 = np.zeros((NUM_T_LAYERS, NUM_TIMESTEP_SWEEPS)) # test all three
+# heatmap_data_sum_diff_24 = np.zeros((NUM_T_LAYERS, NUM_TIMESTEP_SWEEPS))
+# heatmap_data_sum_diff_22 = np.zeros((NUM_T_LAYERS, NUM_TIMESTEP_SWEEPS))
+heatmap_data_argmax_diffs = [np.zeros((NUM_T_LAYERS, NUM_TIMESTEP_SWEEPS)), np.zeros((NUM_T_LAYERS, NUM_TIMESTEP_SWEEPS)), np.zeros((NUM_T_LAYERS, NUM_TIMESTEP_SWEEPS))]
+
 patching_strings = {}
+######################################################################
 
 # Logit difference timestep constants
+logit_diffs_clean= []
+logit_diffs_corrupt= []
+for i in range(0, len(TARGET_TRANSITIONS)):
+    logit_diffs_clean.append(clean_output[22 + i, 0, TARGET_TRANSITIONS[i]] - clean_output[22 + i, 0, WRONG_TRANSITIONS[i]])
+    logit_diffs_corrupt.append(corrupted_output[22 + i, 0, TARGET_TRANSITIONS[i]] - corrupted_output[22 + i, 0, WRONG_TRANSITIONS[i]])
+
+baseline_diffs = []
+for i in range(0, len(TARGET_TRANSITIONS)): # Positive if clean is closer to the target than wrong, negative if corrupt is closer to target than wrong, 0 if same
+    baseline_diffs.append(logit_diffs_clean[i].to(torch.float32) - logit_diffs_corrupt[i].to(torch.float32))
+print(f"Output shape: {clean_output.shape}")
+print(f"baseline diff: {baseline_diffs}")
+
+##############################
+###### PATCHING SWEEP ########
+##############################
+
 
 for layer_idx in range(NUM_T_LAYERS):
     print(f"Sweeping layer {layer_idx}")
 
-    with model.trace(clean_input):
-        clean_activation_proxy = model.encoder.transformer_encoder[layer_idx].output[0].save()
-    clean_activation = clean_activation_proxy.detach()
-    del clean_activation_proxy
+    with model.trace(corrupted_input):
+        corrupt_activation_proxy = model.encoder.transformer_encoder[layer_idx].output[0].save()
+    
+    corrupt_activation = corrupt_activation_proxy.detach()
+    del corrupt_activation_proxy
+            
 
     for time_offset, t in enumerate(range(SWEEP_WINDOW_START, SWEEP_WINDOW_END)):
         print(f"Sweeping transformer timestep {t} : offset {time_offset} -> output {2*t}")
 
-        with model.trace(corrupted_input):
-            # print(f"Shape: {clean_activation.shape}")
-            model.encoder.transformer_encoder[layer_idx].output[0][t-1:t+2, :] = clean_activation[t-1:t+2, :]
-            patched_scores_proxy = model.output.save()
+        with model.trace(clean_input):
+            model.encoder.transformer_encoder[layer_idx].output[0][t-1:t+2, :] = corrupt_activation[t-1:t+2, :]
+            noised_scores_proxy = model.output.save()
 
-        patched_scores = patched_scores_proxy.detach()
+        noised_scores = noised_scores_proxy.detach()
 
         # This is higher if C is more likely
-        patched_logit_diff = patched_scores[score_window_start_idx, 0, INDEX_C] - patched_scores[score_window_start_idx, 0, INDEX_BLANK]
-        patched_diff = logit_diff_clean.to(torch.float32) - patched_logit_diff.to(torch.float32)
+        noised_logit_diffs = []
+        degradation_scores = []
 
-        recovery_score = 1.0 - (patched_diff / baseline_diff)
-
-        heatmap_data[layer_idx, time_offset] = recovery_score
-        patching_strings[(layer_idx, time_offset)] = bonito_model.decode(patched_scores[:, 0, :].to(torch.float32) )
-
-        del patched_scores_proxy
-        del patched_scores
+        # 0 means same, 1 means noising made it look like corrupt
+        for i in range(0, len(TARGET_TRANSITIONS)): #TODO: Make this not all dependent on the heatmap arg
+            noised_logit_diffs.append(noised_scores[22 + i, 0, TARGET_TRANSITIONS[i]] - noised_scores[22 + i, 0, WRONG_TRANSITIONS[i]])
         
-    del clean_activation
+        for i in range(0, len(TARGET_TRANSITIONS)): # 0 if patched diff = baseline between clean and corrupt, 1 if patched = clean 
+            degradation_scores.append((logit_diffs_clean[i].to(torch.float32) - noised_logit_diffs[i].to(torch.float32))/baseline_diffs[i])
+            heatmap_data_argmax_diffs[i][layer_idx, time_offset] = degradation_scores[i]
+
+
+        patching_strings[(layer_idx, time_offset)] = bonito_model.decode(noised_scores[:, 0, :].to(torch.float32) )
+
+        del noised_scores_proxy
+        del noised_scores
+        
+    del corrupt_activation
     gc.collect() 
     torch.cuda.empty_cache()
 
@@ -167,10 +197,11 @@ for layer_idx in range(NUM_T_LAYERS):
 file_name, extension = os.path.splitext(__file__)
 
 # Plot results
-plt.figure()
-sns.heatmap(heatmap_data)
-plt.savefig(f"{file_name}_heatmap_results.png")
-np.save(f"{file_name}_heatmap_data.npy", heatmap_data)
+for i in range(0, len(TARGET_TRANSITIONS)):
+    plt.figure()
+    sns.heatmap(heatmap_data_argmax_diffs[i])
+    plt.savefig(f"{file_name}_heatmap_results_{22 + i}.png")
+    np.save(f"{file_name}_heatmap_data_{22 + i}.npy", heatmap_data_argmax_diffs[i])
 
 
 string_clean = bonito_model.decode(clean_output[:, 0, :]) # Need to convert to a numpy array in memory
@@ -187,5 +218,5 @@ with open(f"{file_name}_strings.txt", "w") as f:
     for layer_idx in range(NUM_T_LAYERS):
         print(f"--- Patched Strings for Layer {layer_idx} ---", file=f)
         for time_offset, t in enumerate(range(SWEEP_WINDOW_START, SWEEP_WINDOW_END)):
-            print(f"Time {time_offset} : {patching_strings[layer_idx, time_offset]} : score: {heatmap_data[layer_idx, time_offset]}", file=f)
+            print(f"Time {time_offset} : {patching_strings[layer_idx, time_offset]} : scores: {heatmap_data_argmax_diffs[0][layer_idx, time_offset]}, {heatmap_data_argmax_diffs[1][layer_idx, time_offset]}, {heatmap_data_argmax_diffs[2][layer_idx, time_offset]}", file=f)
 
