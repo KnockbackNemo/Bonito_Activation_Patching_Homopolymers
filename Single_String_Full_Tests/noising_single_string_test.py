@@ -1,5 +1,5 @@
 # The goal of this file is to run a test but with more metrics - and more inputs. Ideally, this will loop over multiple inputs in a folder and then print metrics for them.
-
+# OKAY I MIGHT HAVE MESSED THIS ONE UP
 import torch
 import os
 import gc

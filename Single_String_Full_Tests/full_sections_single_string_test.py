@@ -12,6 +12,10 @@ from bonito import util
 from bonito.reader import Reader, read_chunks
 from nnsight import NNsight
 
+# Write data to a file
+file_name, extension = os.path.splitext(__file__)
+
+
 
 ##############################
 ######## MODEL SETUP #########
@@ -134,22 +138,25 @@ def run_patching_sweep(model, source_input, target_input, component="mlp", head_
 # Plot results
 def plot_and_save_outputs(heatmap_data, component="mlp", metric_mode="recovery"):
     
-    if component=="head": #heatmap_data has NUM_HEADS groups of three
-        for j in range(NUM_HEADS):
-            for i in range(0, len(TARGET_TRANSITIONS)):
-                plt.figure()
-                sns.heatmap(heatmap_data[j][i])
-                plt.savefig(f"{file_name}_{component}_{j}_heatmap_results_stp_{22 + i}.png")
-                np.save(f"{file_name}_{component}_{j}_heatmap_data_{22 + i}.npy", heatmap_data[j][i])
-        return
+    # if component=="head": #heatmap_data has NUM_HEADS groups of three
+    #     for j in range(NUM_HEADS):
+    #         for i in range(0, len(TARGET_TRANSITIONS)):
+    #             plt.figure()
+    #             sns.heatmap(heatmap_data[j][i])
+    #             plt.savefig(f"{file_name}_{component}_{j}_heatmap_results_stp_{22 + i}.png")
+    #             np.save(f"{file_name}_{component}_{j}_heatmap_data_{22 + i}.npy", heatmap_data[j][i])
+    #     return
     
-    else:
+    # else:
         for i in range(0, len(TARGET_TRANSITIONS)):
             plt.figure()
             sns.heatmap(heatmap_data[i])
+            plt.title(f"{file_name} {component} heatmap_results_stp_{22 + i}")
+            plt.xlabel(f"Time ticks")
+            plt.ylabel(f"Layer")
             plt.savefig(f"{file_name}_{component}_heatmap_results_stp_{22 + i}.png")
             np.save(f"{file_name}_{component}_heatmap_data_{22 + i}.npy", heatmap_data[i])
-
+            plt.close()
 
 ##############################
 ######## DATA CREATION ####### #TODO: We will want to load in reads generated from somewhere else instead probably
@@ -277,8 +284,9 @@ head_recoveries = []
 NUM_HEADS = 8
 for h in range(NUM_HEADS):
     print(f"Sweeping head {h} denoising...")
-    head_recoveries.append(run_patching_sweep(model, clean_input, corrupted_input, component="head", head_idx=h, metric_mode="recovery")
-)
+    head_recoveries.append(run_patching_sweep(model, clean_input, corrupted_input, component="head", head_idx=h, metric_mode="recovery"))
+    plot_and_save_outputs(head_recoveries[h], component=f"head {h} denoising")
+
     
 # Noising
 mlp_degradation = run_patching_sweep(model, corrupted_input, clean_input, component="mlp", metric_mode="degradation")
@@ -288,22 +296,19 @@ head_degradations = []
 NUM_HEADS = 8
 for h in range(NUM_HEADS):
     print(f"Sweeping head {h} noising...")
-    head_degradations.append(run_patching_sweep(model, corrupted_input, clean_input, component="head", head_idx=h, metric_mode="degradation")
-)
+    head_degradations.append(run_patching_sweep(model, corrupted_input, clean_input, component="head", head_idx=h, metric_mode="degradation"))
+    plot_and_save_outputs(head_degradations[h], component=f"head {h} noising")
+
 
 # Plot denoising
 plot_and_save_outputs(mlp_recovery, component="mlp_denoising")
 plot_and_save_outputs(attn_recovery, component="attn_denoising")
-plot_and_save_outputs(head_recoveries, component="head_denoising")
+## plot_and_save_outputs(head_recoveries, component="head_denoising")
 
 # Plot noising
 plot_and_save_outputs(mlp_degradation, component="mlp_noising")
 plot_and_save_outputs(attn_degradation, component="attn_noising")
-plot_and_save_outputs(head_degradations, component="head_noising")
-
-# Write data to a file
-file_name, extension = os.path.splitext(__file__)
-
+### plot_and_save_outputs(head_degradations, component="head_noising")
 
 
 string_clean = bonito_model.decode(clean_output[:, 0, :]) # Need to convert to a numpy array in memory
