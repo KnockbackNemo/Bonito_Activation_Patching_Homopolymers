@@ -3,7 +3,7 @@
 import torch
 import os
 import gc
-# import pod5
+import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
@@ -11,6 +11,8 @@ from bonito import util
 # from bonito import util
 from bonito.reader import Reader, read_chunks
 from nnsight import NNsight
+from dataclasses import dataclass
+from pathlib import Path
 
 
 ##############################
@@ -33,20 +35,44 @@ model = NNsight(bonito_model._orig_mod) # Use unoptimized model to avoid conflic
 model_dtype = next(model.parameters()).dtype #torch.float16
 
 
-# For writing data to a file
+##############################
+########  FILE SETUP #########
+##############################
 file_name, extension = os.path.splitext(__file__)
 
 ##############################
 ########## FUNCTIONS #########
 ##############################
-def run_patching_sweep(model, source_input, target_input, component="mlp", head_idx=None, metric_mode="recovery"):
+
+@dataclass
+class check_output_timestamps_obj:
+    timestamp: int
+    target_transition: any #TODO not sure what type this is
+    wrong_transition: any
+
+def run_patching_sweep(model, source_input, target_input, check_output_timestamps_list, 
+                       component="mlp", head_idx=None, metric_mode="recovery", global_baseline_diff=None):
     """
     component options: "mlp", "attn", "head"
     """
 
-    heatmap_data = [np.zeros((NUM_T_LAYERS, NUM_TIMESTEP_SWEEPS)) for _ in range(3)]
+    # Each row is a patch (differ in layer #, component type, & timestep)
+    results = []
 
+    # heatmap_data = [np.zeros((NUM_T_LAYERS, NUM_TIMESTEP_SWEEPS)) for _ in range(3)]
+    
+    ######## Get baseline clean and corrupt outputs for comparison #######
+    with model.trace(source_input):
+        source_output_proxy = model.output.save()
+    source_output = source_output_proxy.detach() #TODO What does proxy and detach do?
 
+    with model.trace(target_input):
+        target_output_proxy = model.output.save()
+    target_output = target_output_proxy.detach()
+
+    global_mse_baseline_diff = torch.nn.functional.mse_loss(source_output.to(torch.float32), target_output.to(torch.float32)).item()
+
+    ####### Run the actual patching ########################
     for layer_idx in range(NUM_T_LAYERS):
         layer = model.encoder.transformer_encoder[layer_idx]
 
@@ -62,24 +88,15 @@ def run_patching_sweep(model, source_input, target_input, component="mlp", head_
         src_act = src_act_proxy.detach()
         del src_act_proxy
 
-
         ### Patch target ###
-
         for time_offset, t in enumerate(range(PATCHING_SWEEP_WINDOW_START_IDX, PATCHING_SWEEP_WINDOW_END_IDX)):
             with model.trace(target_input):
-                ############TODO Clean this up too
                 # Calculate safe slice bounds for all components
                 start = max(0, t - 1)
                 
                 # Need sequence length for the upper bound
-                # Assuming src_act shape is [batch, seq_len, d_model] or [seq_len, d_model]
                 seq_len, d_model=src_act.shape[-2:]
                 
-                # if component in ["mlp", "attn"]:
-                #     seq_len = src_act.shape[1] if len(src_act.shape) == 3 else src_act.shape[0]
-                # else:
-                #     seq_len = layer.self_attn.out_proj.input[0].shape[0]
-                    
                 end = min(seq_len, t + 2)
 
                 if component == "mlp":
@@ -114,47 +131,92 @@ def run_patching_sweep(model, source_input, target_input, component="mlp", head_
                     layer.self_attn.out_proj.input = patched 
 
                 patched_scores_proxy = model.output.save()
+
             patched_scores = patched_scores_proxy.detach()
 
-            ### Calculate metrics ###
-            for i in range(len(TARGET_TRANSITIONS)):
-                if baseline_diffs[i] == 0.0:
-                    heatmap_data[i][layer_idx, time_offset] = 0.0
-                    continue
+            ####### Calculate metrics ##########
+            for i in range(len(check_output_timestamps_list)):
+                time_idx = check_output_timestamps_list[i].timestamp
+                target_idx = check_output_timestamps_list[i].target_transition
+                wrong_idx = check_output_timestamps_list[i].wrong_transition
 
-                patched_diff = patched_scores[22+i, 0, TARGET_TRANSITIONS[i]] - patched_scores[22+i, 0, WRONG_TRANSITIONS[i]]
-
+                patched_diff = patched_scores[time_idx, 0, target_idx] - patched_scores[time_idx, 0, wrong_idx]
+                if baseline_diffs[i] == 0:
+                    score = 0
                 if metric_mode == "recovery":
                     score = 1 - (logit_diffs_clean[i] - patched_diff) / baseline_diffs[i]
+                    score = score.item()
                 elif metric_mode == "degradation":
                     score = (logit_diffs_clean[i] - patched_diff) / baseline_diffs[i]
+                    score = score.item()
 
-                heatmap_data[i][layer_idx, time_offset] = score.item()
+                # Get additional metrics
+                target_logit = patched_scores[time_idx, 0, target_idx].item()
+                wrong_logit = patched_scores[time_idx, 0, wrong_idx].item()
+                global_mse_diff = torch.nn.functional.mse_loss(source_output.to(torch.float32), patched_scores.to(torch.float32)).item()
+                actual_max_pred = torch.argmax(patched_scores[time_idx, 0, :]).item()
+                
+                # If the MSE is greater than clean vs corrupt or the target prediction for this particular timestep isn't correct, decode and save the string
+                is_target_argmax = actual_max_pred == target_idx
+                should_decode = is_target_argmax or (global_mse_diff > global_mse_baseline_diff)
+
+                string = None
+                if should_decode:
+                    string = bonito_model.decode(patched_scores[:, 0, :])
+                
+                #### Save everything to a dictionary
+                results.append({
+                    "Layer:": layer_idx,
+                    "Time_Offset": time_offset,
+                    "Target_Timestep": time_idx,
+                    "Component": component if head_idx is None else f"head_{head_idx}",
+                    "Metric_Mode": metric_mode,
+                    "Score": score,
+                    "Target_Logit": target_logit,
+                    "Wrong_Logit": wrong_logit,
+                    "Actual_Argmax": actual_max_pred,
+                    "Is_Target_Argmax": is_target_argmax,
+                    "Should_Decode": should_decode,
+                    "Global_MSE_Diff": global_mse_diff,
+                    "New_String": string
+                })
 
             del patched_scores_proxy, patched_scores
 
-    return heatmap_data
+    return pd.DataFrame(results)
 
 
     
     
 # Plot results
-def plot_and_save_outputs(heatmap_data, component="mlp", metric_mode="recovery"):
+def plot_and_save_outputs(df, component="mlp"):
     
-        for i in range(0, len(TARGET_TRANSITIONS)):
+        # Plot and save each timestep individually
+        for step in df['Target_Timestep'].unique():
+
+            step_df = df[df['Target_Step'] == step]
+
+            heatmap_matrix = step_df.pivot(index="Layer", columns="Time_Offset", values="Score")
+
             plt.figure()
-            sns.heatmap(heatmap_data[i])
-            plt.title(f"{file_name} {component} heatmap_results_stp_{22 + i}")
+            sns.heatmap(heatmap_matrix)
+            plt.title(f"{file_name} {component} heatmap_results_stp_{step}")
             plt.xlabel(f"Time ticks")
             plt.ylabel(f"Layer")
-            plt.savefig(f"{file_name}_{component}_heatmap_results_stp_{22 + i}.png")
-            np.save(f"{file_name}_{component}_heatmap_data_{22 + i}.npy", heatmap_data[i])
+            plt.savefig(f"{file_name}_{component}_heatmap_results_stp_{step}.png")
             plt.close()
+
+            folder_path = f"patch_results/{file_name}"
+            filename = (f"{component}_data_step_{step}.csv")
+
+            os.makedirs(folder_path, exist_ok=True)
+
+            full_path = os.path.join(folder_path, file_name)           
+            step_df.to_csv(full_path, index=False)
 
 ##############################
 ######## DATA CREATION ####### #TODO: We will want to load in reads generated from somewhere else instead probably
 ##############################
-
 
 # Load in data
 data_dir = "../data/reads/"
