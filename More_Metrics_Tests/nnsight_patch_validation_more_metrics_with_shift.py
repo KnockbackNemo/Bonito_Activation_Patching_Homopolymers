@@ -112,7 +112,7 @@ del corrupted_output_proxy
 # Calculate baseline MSE at the time
 # The homopolymer we want has Cs starting at 14, 15, 16, 20, and 22 with the next A starting at 24 and ending at 26
 # Format of the scores is [timesteps, batch, transitions]
-score_window_start_idx = 24 # REPLACE_START - 10 # I think this is the wrong index
+score_window_start_idx = 23 # REPLACE_START - 10 # I think this is the wrong index
 score_window_end_idx : 25
 INDEX_C = 2
 INDEX_BLANK = 0
@@ -120,7 +120,7 @@ INDEX_BLANK = 0
 logit_diff_clean = clean_output[score_window_start_idx, 0, INDEX_C] - clean_output[score_window_start_idx, 0, INDEX_BLANK]
 logit_diff_corrupt = corrupted_output[score_window_start_idx, 0, INDEX_C] - corrupted_output[score_window_start_idx, 0, INDEX_BLANK]
 
-baseline_diff = torch.nn.functional.mse_loss(logit_diff_clean.to(torch.float32), logit_diff_corrupt.to(torch.float32)).item()
+baseline_diff = logit_diff_clean.to(torch.float32) - logit_diff_corrupt.to(torch.float32)
 print(f"baseline diff: {baseline_diff}")
 
 ##############################
@@ -157,8 +157,7 @@ for layer_idx in range(NUM_T_LAYERS):
         patched_scores = patched_scores_proxy.detach()
 
         patched_logit_diff = patched_scores[score_window_start_idx, 0, INDEX_C] - patched_scores[score_window_start_idx, 0, INDEX_BLANK]
-        patched_diff = torch.nn.functional.mse_loss(logit_diff_clean.to(torch.float32), patched_logit_diff.to(torch.float32)).item()
-
+        patched_diff = logit_diff_clean.to(torch.float32) - patched_logit_diff.to(torch.float32)
         recovery_score = 1.0 - (patched_diff / baseline_diff)
 
         heatmap_data[layer_idx, time_offset] = recovery_score
