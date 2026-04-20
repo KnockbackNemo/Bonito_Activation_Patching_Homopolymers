@@ -104,7 +104,7 @@ def run_patching_sweep(model, source_input, target_input, check_output_timestamp
                     target = layer.ff.fc2.output.clone() # Shape: [1, seq_len, 512]
                     assert target.numel() == seq_len * d_model
                     # target[0, t-1:t+2, :] = src_act[0, t-1:t+2, :]
-                    target[start:end, :] = src_act[start:end, :]
+                    target[0, start:end, :] = src_act[0, start:end, :]
                     layer.ff.fc2.output = target
 
                 elif component == "attn":
@@ -140,18 +140,8 @@ def run_patching_sweep(model, source_input, target_input, check_output_timestamp
                 wrong_transition_idx = torch.argmax(target_output[timestep, 0, :]).item() 
                 logit_diff_source = source_output[timestep,0,target_transition_idx] - source_output[timestep,0,wrong_transition_idx]
                 logit_diff_target = target_output[timestep,0,target_transition_idx] - target_output[timestep,0,wrong_transition_idx]
-                baseline_diff = logit_diff_source - logit_diff_target
+                baseline_logit_diff = logit_diff_source - logit_diff_target
 
-
-                patched_diff = patched_scores[timestep, 0, target_transition_idx] - patched_scores[timestep, 0, wrong_transition_idx]
-                if baseline_diff == 0:
-                    score = 0
-                if metric_mode == "recovery":
-                    score = 1 - (logit_diff_source - patched_diff) / baseline_diff # 1 means full recovery, 0 means no change
-                    score = score.item()
-                elif metric_mode == "degradation":
-                    score = (logit_diff_source - patched_diff) / baseline_diff # 1 means full degradation, 0 means no change
-                    score = score.item()
 
                 ### Get additional metrics ###
                 # Logits and strings
@@ -162,7 +152,7 @@ def run_patching_sweep(model, source_input, target_input, check_output_timestamp
                 wrong_string = transition_idx_to_str(wrong_transition_idx)
                 actual_string = transition_idx_to_str(actual_max_pred_idx)
 
-                # Posteriors and strings - this includes global most likely path calculations
+                # Posteriors and strings - this includes global most likely path calculations #TODO There is definitely a cleaner way to do this
                 source_posteriors = bonito_model.seqdist.posteriors(source_output.to(torch.float32)) + 1e-8
                 target_posteriors = bonito_model.seqdist.posteriors(target_output.to(torch.float32)) + 1e-8
                 patched_posteriors = bonito_model.seqdist.posteriors(patched_scores.to(torch.float32)) + 1e-8
@@ -174,8 +164,38 @@ def run_patching_sweep(model, source_input, target_input, check_output_timestamp
                 actual_state_prob = patched_posteriors[timestep, 0, posteriors_actual_transition_idx]
                 posteriors_target_string = transition_idx_to_str(posteriors_target_transition_idx)
                 posteriors_wrong_string = transition_idx_to_str(posteriors_wrong_transition_idx)
-                posteriors_actual_string = transition_idx_to_str(posteriors_actual_transition_idx)                
+                posteriors_actual_string = transition_idx_to_str(posteriors_actual_transition_idx) 
 
+                   
+                
+                # Logit calculations
+                patched_logit_diff = patched_scores[timestep, 0, target_transition_idx] - patched_scores[timestep, 0, wrong_transition_idx]
+
+                if baseline_logit_diff == 0:
+                    logit_score = 0
+                elif metric_mode == "recovery":
+                    logit_score = 1 - (logit_diff_source - patched_logit_diff) / baseline_logit_diff # 1 means full recovery, 0 means no change
+                    logit_score = logit_score.item()
+                elif metric_mode == "degradation":
+                    logit_score = (logit_diff_source - patched_logit_diff) / baseline_logit_diff # 1 means full degradation, 0 means no change
+                    logit_score = logit_score.item()
+             
+
+                # Probability calculations (posteriors)
+                
+                patched_prob_diff = target_state_prob - wrong_state_prob
+                prob_diff_source = source_posteriors[timestep, 0, posteriors_target_transition_idx] - source_posteriors[timestep, 0, posteriors_wrong_transition_idx]
+                prob_diff_target = target_posteriors[timestep, 0, posteriors_target_transition_idx] - target_posteriors[timestep, 0, posteriors_wrong_transition_idx]
+                baseline_prob_diff = prob_diff_source - prob_diff_target 
+                
+                if baseline_prob_diff == 0:
+                    posteriors_score = 0
+                elif metric_mode == "recovery":
+                    posteriors_score = 1 - (prob_diff_source - patched_prob_diff) / baseline_prob_diff # 1 means full recovery, 0 means no change
+                    posteriors_score = posteriors_score.item()
+                elif metric_mode == "degradation":
+                    posteriors_score = (prob_diff_source - patched_prob_diff) / baseline_prob_diff # 1 means full degradation, 0 means no change
+                    posteriors_score = posteriors_score.item()
 
 
                 # If the MSE is greater than clean vs corrupt or the target prediction for this particular timestep isn't correct, decode and save the string
@@ -195,7 +215,8 @@ def run_patching_sweep(model, source_input, target_input, check_output_timestamp
                     "Target_Timestep": timestep,
                     "Component": component if head_idx is None else f"head_{head_idx}",
                     "Metric_Mode": metric_mode,
-                    "Score": score,
+                    "Logit_Score": logit_score,
+                    "Posteriors_Score": posteriors_score,
                     "Target_Transition_Prior": target_transition_idx,
                     "Target_String_Prior": target_string,
                     "Target_Logit": target_logit,
@@ -234,21 +255,32 @@ def plot_and_save_outputs(df, component="mlp"):
 
             step_df = df[df['Target_Timestep'] == step]
 
-            heatmap_matrix = step_df.pivot(index="Layer", columns="Time_Offset", values="Score")
-
             folder_path = f"patch_results/{file_name}"
             
             csv_filename = (f"{component}_data_step_{step}.csv")
             csv_full_path = os.path.join(folder_path, csv_filename) 
 
-            png_filename = (f"{component}_heatmap_results_stp_{step}.png")
-            png_full_path = os.path.join(folder_path, png_filename) 
-
             os.makedirs(folder_path, exist_ok=True)
 
+            # Logit heatmaps
+            png_filename = (f"{component}_logit_heatmap_results_stp_{step}.png")
+            png_full_path = os.path.join(folder_path, png_filename) 
+            heatmap_matrix = step_df.pivot(index="Layer", columns="Time_Offset", values="Score")
             plt.figure()
             sns.heatmap(heatmap_matrix)
-            plt.title(f"{file_name} {component} heatmap_results_stp_{step}")
+            plt.title(f"{component} logit heatmap results timestep {step}")
+            plt.xlabel(f"Time ticks")
+            plt.ylabel(f"Layer")
+            plt.savefig(png_full_path)
+            plt.close()
+
+            # Probabilitiy heatmaps
+            png_filename = (f"{component}_posteriors_heatmap_results_stp_{step}.png")
+            png_full_path = os.path.join(folder_path, png_filename) 
+            heatmap_matrix = step_df.pivot(index="Layer", columns="Time_Offset", values="Score")
+            plt.figure()
+            sns.heatmap(heatmap_matrix)
+            plt.title(f"{component} posteriors heatmap results timestep {step}")
             plt.xlabel(f"Time ticks")
             plt.ylabel(f"Layer")
             plt.savefig(png_full_path)
