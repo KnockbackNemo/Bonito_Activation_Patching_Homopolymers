@@ -39,7 +39,7 @@ model_dtype = next(model.parameters()).dtype #torch.float16
 
 
 # Load in data
-data_dir = "./data/reads/"
+data_dir = "../data/reads/"
 
 reader = Reader(data_dir)
 

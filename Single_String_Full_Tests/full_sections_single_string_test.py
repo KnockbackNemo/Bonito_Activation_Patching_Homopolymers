@@ -8,7 +8,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 from bonito import util
-# from bonito import util
 from bonito.reader import Reader, read_chunks
 from nnsight import NNsight
 from dataclasses import dataclass
@@ -40,18 +39,20 @@ model_dtype = next(model.parameters()).dtype #torch.float16
 ##############################
 file_name, extension = os.path.splitext(__file__)
 
+file_name += "_" + "R0_C_First_String" # Extra name here
+
 ##############################
 ########## FUNCTIONS #########
 ##############################
 
-@dataclass
-class check_output_timestamps_obj:
-    timestamp: int
-    target_transition: any #TODO not sure what type this is
-    wrong_transition: any
+# @dataclass
+# class check_output_timestamps_obj:
+#     timestamp: int
+#     target_transition: any #TODO not sure what type this is
+#     wrong_transition: any
 
 def run_patching_sweep(model, source_input, target_input, check_output_timestamps_list, 
-                       component="mlp", head_idx=None, metric_mode="recovery", global_baseline_diff=None):
+                       component="mlp", head_idx=None, metric_mode="recovery"):
     """
     component options: "mlp", "attn", "head"
     """
@@ -70,6 +71,7 @@ def run_patching_sweep(model, source_input, target_input, check_output_timestamp
         target_output_proxy = model.output.save()
     target_output = target_output_proxy.detach()
 
+    ## Calculate some stats
     global_mse_baseline_diff = torch.nn.functional.mse_loss(source_output.to(torch.float32), target_output.to(torch.float32)).item()
 
     ####### Run the actual patching ########################
@@ -96,24 +98,27 @@ def run_patching_sweep(model, source_input, target_input, check_output_timestamp
                 
                 # Need sequence length for the upper bound
                 seq_len, d_model=src_act.shape[-2:]
+                assert seq_len != 1 and d_model != 1
                 
                 end = min(seq_len, t + 2)
 
                 if component == "mlp":
                     target = layer.ff.fc2.output.clone() # Shape: [1, seq_len, 512]
+                    assert target.numel() == seq_len * d_model
                     # target[0, t-1:t+2, :] = src_act[0, t-1:t+2, :]
                     target[start:end, :] = src_act[start:end, :]
                     layer.ff.fc2.output = target
 
                 elif component == "attn":
                     target = layer.self_attn.output[0].clone() # Shape: [seq_len, 512]
+                    assert target.numel() == seq_len * d_model
                     # target[t-1:t+2, :] = src_act[t-1:t+2, :]
                     target[start:end, :] = src_act[start:end, :]
                     layer.self_attn.output[0] = target
                 
                 elif component == "head":
                     target = layer.self_attn.out_proj.input[0] # Shape: [seq_len, 512]
-
+                    assert target.numel() == seq_len * d_model
                     # seq_len, d_model = target_act.shape
                     # 8 heads -> 64 = size of each head
                     nhead, head_dim = 8, 64
@@ -123,6 +128,7 @@ def run_patching_sweep(model, source_input, target_input, check_output_timestamp
                     # start = max(0, t - 1)
                     # end = min(seq_len, t + 2)
 
+
                     target_reshaped[start:end, head_idx, :] = src_reshaped[start:end, head_idx, :]
 
                     patched = target_reshaped.reshape(seq_len, d_model)
@@ -130,34 +136,51 @@ def run_patching_sweep(model, source_input, target_input, check_output_timestamp
                     # Reshape and put back into activations
                     layer.self_attn.out_proj.input = patched 
 
+                    # ## Sanity check
+                    # orig = target.clone()
+                    # diff = (patched - orig).abs()
+                    # # reshape both the same way you do for heads
+                    # diff_heads = diff.reshape(seq_len, nhead, head_dim)
+                    # # sum per head
+                    # head_magnitudes = diff_heads.sum(dim=(0, 2))  # [nhead]
+                    # print("Head diffs:", head_magnitudes)
+
                 patched_scores_proxy = model.output.save()
 
             patched_scores = patched_scores_proxy.detach()
 
             ####### Calculate metrics ##########
-            for i in range(len(check_output_timestamps_list)):
-                time_idx = check_output_timestamps_list[i].timestamp
-                target_idx = check_output_timestamps_list[i].target_transition
-                wrong_idx = check_output_timestamps_list[i].wrong_transition
+            for timestep in check_output_timestamps_list:
+                
+                target_transition_idx = torch.argmax(source_output[timestep, 0, :]).item()
+                wrong_transition_idx = torch.argmax(target_output[timestep, 0, :]).item()
+                logit_diff_source = source_output[timestep,0,target_transition_idx] - source_output[timestep,0,wrong_transition_idx]
+                logit_diff_target = target_output[timestep,0,target_transition_idx] - target_output[timestep,0,wrong_transition_idx]
+                baseline_diff = logit_diff_source - logit_diff_target
 
-                patched_diff = patched_scores[time_idx, 0, target_idx] - patched_scores[time_idx, 0, wrong_idx]
-                if baseline_diffs[i] == 0:
+
+                # time_idx = check_output_timestamps_list[i].timestamp
+                # target_idx = check_output_timestamps_list[i].target_transition
+                # wrong_idx = check_output_timestamps_list[i].wrong_transition
+
+                patched_diff = patched_scores[timestep, 0, target_transition_idx] - patched_scores[timestep, 0, wrong_transition_idx]
+                if baseline_diff == 0:
                     score = 0
                 if metric_mode == "recovery":
-                    score = 1 - (logit_diffs_clean[i] - patched_diff) / baseline_diffs[i]
+                    score = 1 - (logit_diff_source - patched_diff) / baseline_diff
                     score = score.item()
                 elif metric_mode == "degradation":
-                    score = (logit_diffs_clean[i] - patched_diff) / baseline_diffs[i]
+                    score = (logit_diff_source - patched_diff) / baseline_diff
                     score = score.item()
 
                 # Get additional metrics
-                target_logit = patched_scores[time_idx, 0, target_idx].item()
-                wrong_logit = patched_scores[time_idx, 0, wrong_idx].item()
+                target_logit = patched_scores[timestep, 0, target_transition_idx].item()
+                wrong_logit = patched_scores[timestep, 0, wrong_transition_idx].item()
                 global_mse_diff = torch.nn.functional.mse_loss(source_output.to(torch.float32), patched_scores.to(torch.float32)).item()
-                actual_max_pred = torch.argmax(patched_scores[time_idx, 0, :]).item()
+                actual_max_pred = torch.argmax(patched_scores[timestep, 0, :]).item()
                 
                 # If the MSE is greater than clean vs corrupt or the target prediction for this particular timestep isn't correct, decode and save the string
-                is_target_argmax = actual_max_pred == target_idx
+                is_target_argmax = actual_max_pred == target_transition_idx
                 should_decode = is_target_argmax or (global_mse_diff > global_mse_baseline_diff)
 
                 string = None
@@ -166,18 +189,24 @@ def run_patching_sweep(model, source_input, target_input, check_output_timestamp
                 
                 #### Save everything to a dictionary
                 results.append({
-                    "Layer:": layer_idx,
+                    "Layer": layer_idx,
                     "Time_Offset": time_offset,
-                    "Target_Timestep": time_idx,
+                    "Target_Timestep": timestep,
                     "Component": component if head_idx is None else f"head_{head_idx}",
                     "Metric_Mode": metric_mode,
                     "Score": score,
+                    "Target": target_transition_idx,
+                    "Target_String": bonito_model.seqdist.path_to_str([target_transition_idx]),
                     "Target_Logit": target_logit,
+                    "Wrong_Transition": wrong_transition_idx,
+                    "Wrong_String": bonito_model.seqdist.path_to_str([wrong_transition_idx]),
                     "Wrong_Logit": wrong_logit,
                     "Actual_Argmax": actual_max_pred,
+                    "Actual_String": bonito_model.seqdist.path_to_str([actual_max_pred]),
+                    "Actual_Argmax_Logit": patched_scores[timestep, 0, actual_max_pred],
                     "Is_Target_Argmax": is_target_argmax,
                     "Should_Decode": should_decode,
-                    "Global_MSE_Diff": global_mse_diff,
+                    "Global_MSE_Change": global_mse_diff - global_mse_baseline_diff,
                     "New_String": string
                 })
 
@@ -185,8 +214,6 @@ def run_patching_sweep(model, source_input, target_input, check_output_timestamp
 
     return pd.DataFrame(results)
 
-
-    
     
 # Plot results
 def plot_and_save_outputs(df, component="mlp"):
@@ -194,25 +221,52 @@ def plot_and_save_outputs(df, component="mlp"):
         # Plot and save each timestep individually
         for step in df['Target_Timestep'].unique():
 
-            step_df = df[df['Target_Step'] == step]
+            step_df = df[df['Target_Timestep'] == step]
 
             heatmap_matrix = step_df.pivot(index="Layer", columns="Time_Offset", values="Score")
+
+            folder_path = f"patch_results/{file_name}"
+            
+            csv_filename = (f"{component}_data_step_{step}.csv")
+            csv_full_path = os.path.join(folder_path, csv_filename) 
+
+            png_filename = f"{file_name}_{component}_heatmap_results_stp_{step}.png"
+            png_full_path = os.path.join(folder_path, png_filename) 
+
+            os.makedirs(folder_path, exist_ok=True)
 
             plt.figure()
             sns.heatmap(heatmap_matrix)
             plt.title(f"{file_name} {component} heatmap_results_stp_{step}")
             plt.xlabel(f"Time ticks")
             plt.ylabel(f"Layer")
-            plt.savefig(f"{file_name}_{component}_heatmap_results_stp_{step}.png")
+            plt.savefig(png_full_path)
             plt.close()
+          
+            step_df.to_csv(csv_full_path, index=False)
 
-            folder_path = f"patch_results/{file_name}"
-            filename = (f"{component}_data_step_{step}.csv")
+def transition_idx_to_str(transition_idx: int):
+    alphabet = model.seqdist.alphabet
+    n_states = len(alphabet)
+    len_window = model.seqdist.state_len
+    n_base = n_states - 1
 
-            os.makedirs(folder_path, exist_ok=True)
+    # Get the transition (which includes blanks)
+    next_base = transition_idx % n_states
+    new_idx = transition_idx // n_states
 
-            full_path = os.path.join(folder_path, file_name)           
-            step_df.to_csv(full_path, index=False)
+    # Work backwards to get the most to least recent base in the transition
+    past_bases_rev = alphabet[next_base]
+    # Use mod to get each state (decoded) and append to a string
+    for i in range(len_window):
+        prev_base = alphabet[(new_idx % n_base) + 1] # No blanks in the context
+        new_idx = new_idx // n_base
+
+        past_bases_rev += prev_base
+
+    past_bases = past_bases_rev[::-1]
+
+    return past_bases
 
 ##############################
 ######## DATA CREATION ####### #TODO: We will want to load in reads generated from somewhere else instead probably
@@ -277,13 +331,21 @@ with model.trace(corrupted_input):
 corrupted_output = corrupted_output_proxy.detach()
 del corrupted_output_proxy
 
-# Calculate baseline MSE at the time
+
+string_clean = bonito_model.decode(clean_output[:, 0, :]) # Need to convert to a numpy array in memory
+string_corrupted = bonito_model.decode(corrupted_output[:, 0, :]) 
+# string_patched = bonito_model.decode(patched_output[:, 0, :]) 
+
+print(f"Clean string: {string_clean}")
+print(f"Corrupted string: {string_corrupted}")
+
+
 # The homopolymer we want has Cs starting at 14, 15, 16, 20, and 22 with the next A starting at 24 and ending at 26
 # Format of the scores is [timesteps, batch, transitions]
 score_window_start_idx = 23 #REPLACE_START - 10 # I think this is the wrong index
 score_window_end_idx = 25
-INDEX_C = 2
-INDEX_BLANK = 0
+# INDEX_C = 2
+# INDEX_BLANK = 0
 
 
 # Run sweep of all layers using a timestep of 1
@@ -300,58 +362,60 @@ NUM_TIMESTEP_SWEEPS = int((PATCHING_SWEEP_WINDOW_END_IDX - PATCHING_SWEEP_WINDOW
 # later - Sum of A states?
 #       - Sum of blank states?
 ###### Things because I can't think right now but I 100% need to fix this (hardcode 22-24)
-TARGET_TRANSITIONS = [torch.argmax(clean_output[22, 0, :]).item(), torch.argmax(clean_output[23, 0, :]).item(), torch.argmax(clean_output[24, 0, :]).item()]
+# TARGET_TRANSITIONS = [torch.argmax(clean_output[22, 0, :]).item(), torch.argmax(clean_output[23, 0, :]).item(), torch.argmax(clean_output[24, 0, :]).item()]
 
-WRONG_TRANSITIONS = [torch.argmax(corrupted_output[22, 0, :]).item(), torch.argmax(corrupted_output[23, 0, :]).item(), torch.argmax(corrupted_output[24, 0, :]).item()]
+# WRONG_TRANSITIONS = [torch.argmax(corrupted_output[22, 0, :]).item(), torch.argmax(corrupted_output[23, 0, :]).item(), torch.argmax(corrupted_output[24, 0, :]).item()]
+# timestep_requests = {}
 
 # heatmap_data_sum_diff_23 = np.zeros((NUM_T_LAYERS, NUM_TIMESTEP_SWEEPS)) # test all three
 # heatmap_data_sum_diff_24 = np.zeros((NUM_T_LAYERS, NUM_TIMESTEP_SWEEPS))
 # heatmap_data_sum_diff_22 = np.zeros((NUM_T_LAYERS, NUM_TIMESTEP_SWEEPS))
 # heatmap_data_argmax_diffs = [np.zeros((NUM_T_LAYERS, NUM_TIMESTEP_SWEEPS)), np.zeros((NUM_T_LAYERS, NUM_TIMESTEP_SWEEPS)), np.zeros((NUM_T_LAYERS, NUM_TIMESTEP_SWEEPS))]
 
-patching_strings = {}
+# patching_strings = {}
 ######################################################################
 
-# Logit difference timestep constants
-logit_diffs_clean= []
-logit_diffs_corrupt= []
-for i in range(0, len(TARGET_TRANSITIONS)):
-    logit_diffs_clean.append(clean_output[22 + i, 0, TARGET_TRANSITIONS[i]] - clean_output[22 + i, 0, WRONG_TRANSITIONS[i]])
-    logit_diffs_corrupt.append(corrupted_output[22 + i, 0, TARGET_TRANSITIONS[i]] - corrupted_output[22 + i, 0, WRONG_TRANSITIONS[i]])
+# # Logit difference timestep constants
+# logit_diffs_clean= []
+# logit_diffs_corrupt= []
+# for i in range(0, len(TARGET_TRANSITIONS)):
+#     logit_diffs_clean.append(clean_output[22 + i, 0, TARGET_TRANSITIONS[i]] - clean_output[22 + i, 0, WRONG_TRANSITIONS[i]])
+#     logit_diffs_corrupt.append(corrupted_output[22 + i, 0, TARGET_TRANSITIONS[i]] - corrupted_output[22 + i, 0, WRONG_TRANSITIONS[i]])
 
-baseline_diffs = []
-for i in range(0, len(TARGET_TRANSITIONS)): # Positive if clean is closer to the target than wrong, negative if corrupt is closer to target than wrong, 0 if same
-    baseline_diffs.append(logit_diffs_clean[i].to(torch.float32) - logit_diffs_corrupt[i].to(torch.float32))
-print(f"Output shape: {clean_output.shape}")
-print(f"baseline diff: {baseline_diffs}")
+# baseline_diffs = []
+# for i in range(0, len(TARGET_TRANSITIONS)): # Positive if clean is closer to the target than wrong, negative if corrupt is closer to target than wrong, 0 if same
+#     baseline_diffs.append(logit_diffs_clean[i].to(torch.float32) - logit_diffs_corrupt[i].to(torch.float32))
+# print(f"Output shape: {clean_output.shape}")
+# print(f"baseline diff: {baseline_diffs}")
 
 ##############################
 ###### PATCHING SWEEP ########
 ##############################
 
+timestamps_to_score = [22, 24]
 # Call patching sweep function and get heatmap_data things to plot
 
 # Denoising
-mlp_recovery = run_patching_sweep(model, clean_input, corrupted_input, component="mlp", metric_mode="recovery")
-attn_recovery = run_patching_sweep(model, clean_input, corrupted_input, component="attn", metric_mode="recovery")
+mlp_recovery = run_patching_sweep(model, clean_input, corrupted_input, timestamps_to_score, component="mlp", metric_mode="recovery")
+attn_recovery = run_patching_sweep(model, clean_input, corrupted_input, timestamps_to_score, component="attn", metric_mode="recovery")
 
 head_recoveries = []
 NUM_HEADS = 8
 for h in range(NUM_HEADS):
     print(f"Sweeping head {h} denoising...")
-    head_recoveries.append(run_patching_sweep(model, clean_input, corrupted_input, component="head", head_idx=h, metric_mode="recovery"))
+    head_recoveries.append(run_patching_sweep(model, clean_input, corrupted_input, timestamps_to_score, component="head", head_idx=h, metric_mode="recovery"))
     plot_and_save_outputs(head_recoveries[h], component=f"head {h} denoising")
 
     
 # Noising
-mlp_degradation = run_patching_sweep(model, corrupted_input, clean_input, component="mlp", metric_mode="degradation")
-attn_degradation = run_patching_sweep(model, corrupted_input, clean_input, component="attn", metric_mode="degradation")
+mlp_degradation = run_patching_sweep(model, corrupted_input, clean_input, timestamps_to_score, component="mlp", metric_mode="degradation")
+attn_degradation = run_patching_sweep(model, corrupted_input, clean_input, timestamps_to_score, component="attn", metric_mode="degradation")
 
 head_degradations = []
 NUM_HEADS = 8
 for h in range(NUM_HEADS):
     print(f"Sweeping head {h} noising...")
-    head_degradations.append(run_patching_sweep(model, corrupted_input, clean_input, component="head", head_idx=h, metric_mode="degradation"))
+    head_degradations.append(run_patching_sweep(model, corrupted_input, clean_input, timestamps_to_score, component="head", head_idx=h, metric_mode="degradation"))
     plot_and_save_outputs(head_degradations[h], component=f"head {h} noising")
 
 
@@ -365,13 +429,6 @@ plot_and_save_outputs(mlp_degradation, component="mlp_noising")
 plot_and_save_outputs(attn_degradation, component="attn_noising")
 ### plot_and_save_outputs(head_degradations, component="head_noising")
 
-
-string_clean = bonito_model.decode(clean_output[:, 0, :]) # Need to convert to a numpy array in memory
-string_corrupted = bonito_model.decode(corrupted_output[:, 0, :]) 
-# string_patched = bonito_model.decode(patched_output[:, 0, :]) 
-
-print(f"Clean string: {string_clean}")
-print(f"Corrupted string: {string_corrupted}")
 
 
 # with open(f"{file_name}_strings.txt", "w") as f:
