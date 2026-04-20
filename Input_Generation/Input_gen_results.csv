@@ -1,0 +1,9 @@
+Row,Noise idx,Insert idx,Clean string,Corrupt_string
+"read_num                                        1
+base                                            A
+num_bases                                       4
+duration_viterbi                               29
+raw start idx                                1530
+raw end idx                                  1704
+input_base_timestamps    [1530, 1536, 1608, 1614]
+Name: 0, dtype: object",254,204,CAGGCTTCTGGCTCACATCTCCAAACCCCAAGTGGGTCCTGGTCACAA,CAGGCTTCTGGCTCACATCTCCAAACCCCAAGTGGGTCCTGGTCACA

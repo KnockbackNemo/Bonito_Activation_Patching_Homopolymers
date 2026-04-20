@@ -265,7 +265,7 @@ def plot_and_save_outputs(df, component="mlp"):
             # Logit heatmaps
             png_filename = (f"{component}_logit_heatmap_results_stp_{step}.png")
             png_full_path = os.path.join(folder_path, png_filename) 
-            heatmap_matrix = step_df.pivot(index="Layer", columns="Time_Offset", values="Score")
+            heatmap_matrix = step_df.pivot(index="Layer", columns="Time_Offset", values="Logit_Score")
             plt.figure()
             sns.heatmap(heatmap_matrix)
             plt.title(f"{component} logit heatmap results timestep {step}")
@@ -277,7 +277,7 @@ def plot_and_save_outputs(df, component="mlp"):
             # Probabilitiy heatmaps
             png_filename = (f"{component}_posteriors_heatmap_results_stp_{step}.png")
             png_full_path = os.path.join(folder_path, png_filename) 
-            heatmap_matrix = step_df.pivot(index="Layer", columns="Time_Offset", values="Score")
+            heatmap_matrix = step_df.pivot(index="Layer", columns="Time_Offset", values="Posteriors_Score")
             plt.figure()
             sns.heatmap(heatmap_matrix)
             plt.title(f"{component} posteriors heatmap results timestep {step}")

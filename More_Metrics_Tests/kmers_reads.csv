@@ -1,4 +1,4 @@
-read_num, base,num_bases,duration_viterbi,raw start idx,raw end idx,input_base_timestamps
+read_num,base,num_bases,duration_viterbi,raw start idx,raw end idx,input_base_timestamps
 1,A,4,29,1530,1704,"[1530, 1536, 1608, 1614]"
 1,C,4,7,3864,3906,"[3864, 3870, 3888, 3900]"
 1,C,4,7,4752,4794,"[4752, 4758, 4776, 4788]"
