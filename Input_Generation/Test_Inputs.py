@@ -40,11 +40,23 @@ def get_string_difference(str1, str2):
             diff_count += max(i2 - i1, j2 - j1)
     return diff_count
 
+def is_homopolymer_single_indel(str1, str2):
+    matcher = difflib.SequenceMatcher(None, str1, str2)
+    diff_count = 0
+    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+        if tag == 'equal':
+            continue
+        elif tag == 'replace':
+            return False
+        elif tag in ('insert', 'delete'):
+            diff_count += max(i2 - i1, j2 - j1)
+    return diff_count
+
 ##############################
 ######## DATA CREATION #######
 ##############################
 
-NUM_READ = 2
+NUM_READ = 3
 
 # Load in data
 data_dir = "../data/reads/"
@@ -71,10 +83,17 @@ CONTEXT_PADDING = 200
 inputs = []
 
 for index, row in df_kmers.iterrows():
-    base = row['base']
-    raw_start = int(row['raw start idx'])
-    raw_end = int(row['raw end idx'])
-    num_bases = int(row['num_bases'])
+    # base, raw_start, raw_end, num_bases
+    try:
+        base = row['base']
+        raw_start = int(row['raw start idx'])
+        raw_end = int(row['raw end idx'])
+        num_bases = int(row['num_bases'])
+    except: # Some of the files still have brackets in strings
+        base = row.loc['base']
+        raw_start = int(row.loc['raw start idx'].strip('[]'))
+        raw_end = int(row.loc['raw end idx'].strip('[]'))
+        num_bases = int(row.loc['num_bases'].strip('[]'))
 
     print(f"Processing row {index}: {num_bases}{base} hpolymer at raw idex {raw_start}-{raw_end}")
 
@@ -94,7 +113,7 @@ for index, row in df_kmers.iterrows():
     
 
     dampen_widths_percent = [0.1, 0.15, 0.2, 0.3, 0.4, 0.5]
-    scale_factors = [0.3, 0.4, 0.5, 0.6, 0.7]
+    scale_factors = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
     for dampen_width_percent in dampen_widths_percent:
         for scale_factor in scale_factors:
 
@@ -125,10 +144,8 @@ for index, row in df_kmers.iterrows():
 
             del clean_output_proxy, corrupted_output_proxy
 
-            diff_score = get_string_difference(clean_str, corrupt_str)
-
-            if diff_score != 1:
-                print(f"Skipping: corruption with width {dampen_width_percent} and scale {scale_factor} changed {diff_score} bases.")
+            if not is_homopolymer_single_indel(clean_str, corrupt_str):
+                print(f"Skipping: corruption with width {dampen_width_percent} and scale {scale_factor} changed more than one base.")
                 # print(f"Clean:  {clean_str}")
                 # print(f"Corrupt:{corrupt_str}")
                 continue
@@ -137,13 +154,26 @@ for index, row in df_kmers.iterrows():
             print(f"Clean:  {clean_str}")
             print(f"Corrupt:{corrupt_str}")
 
-            inputs.append({
-                **row.to_dict(),
-                "Dampen width": dampen_width_percent,
-                "Scale Factor": scale_factor,
-                "Clean string": clean_str,
-                "Corrupt_string": corrupt_str
-            })
+            min_strings = ['AAAA', 'CCCC', 'GGGG', 'TTTT']
+            for minstr in min_strings:
+                if minstr in clean_str and minstr in corrupt_str and (len(clean_str) - len(corrupt_str)):
+            
+                    print(f"Possible success with noise idx {noise_idx} at relative index {i}")
+                    print(f"Clean:  {clean_str}")
+                    print(f"Corrupt:{corrupt_str}")
+
+                    inputs.append({
+                        **row.to_dict(),
+                        "Dampen width": dampen_width_percent,
+                        "Scale Factor": scale_factor,
+                        "Clean string": clean_str,
+                        "Corrupt_string": corrupt_str
+                    })
+
+                    break
+        
+
+            
             
         
 
@@ -174,10 +204,8 @@ for index, row in df_kmers.iterrows():
 
         del clean_output_proxy, corrupted_output_proxy
 
-        diff_score = get_string_difference(clean_str, corrupt_str)
-
-        if diff_score != 1:
-            print(f"Skipping: corruption with noise idx {noise_idx} at relative index {i} changed {diff_score} bases.")
+        if not is_homopolymer_single_indel(clean_str, corrupt_str):
+            print(f"Skipping: corruption with noise idx {noise_idx} at relative index {i} changed more than one base.")
             # print(f"Clean:  {clean_str}")
             # print(f"Corrupt:{corrupt_str}")
             continue
