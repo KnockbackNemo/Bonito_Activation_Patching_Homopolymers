@@ -44,10 +44,11 @@ def get_string_difference(str1, str2):
 ######## DATA CREATION #######
 ##############################
 
+NUM_READ = 2
 
 # Load in data
 data_dir = "../data/reads/"
-csv_path = "../More_Metrics_Tests/kmers_reads.csv"
+csv_path = (f"../More_Metrics_Tests/kmers_data_read_{NUM_READ}.csv") ## Change this to match the name
 df_kmers = pd.read_csv(csv_path)
 
 reader = Reader(data_dir)
@@ -60,7 +61,9 @@ reads = reader.get_reads(
 )
 
 # Grab the very first read
-first_read = next(reads)
+for i in range(0, NUM_READ):
+    first_read = next(reads)
+
 raw_stndrd_signal = first_read.signal
 
 CONTEXT_PADDING = 200
@@ -178,18 +181,24 @@ for index, row in df_kmers.iterrows():
             # print(f"Clean:  {clean_str}")
             # print(f"Corrupt:{corrupt_str}")
             continue
-        
-        print(f"Possible success with noise idx {noise_idx} at relative index {i}")
-        print(f"Clean:  {clean_str}")
-        print(f"Corrupt:{corrupt_str}")
 
-        inputs.append({
-            **row.to_dict(),
-            "Noise idx": noise_idx,
-            "Insert idx": i,
-            "Clean string": clean_str,
-            "Corrupt_string": corrupt_str
-        })
+        min_strings = ['AAAA', 'CCCC', 'GGGG', 'TTTT']
+        for minstr in min_strings:
+            if minstr in clean_str and minstr in corrupt_str:
+        
+                print(f"Possible success with noise idx {noise_idx} at relative index {i}")
+                print(f"Clean:  {clean_str}")
+                print(f"Corrupt:{corrupt_str}")
+
+                inputs.append({
+                    **row.to_dict(),
+                    "Noise idx": noise_idx,
+                    "Insert idx": i,
+                    "Clean string": clean_str,
+                    "Corrupt_string": corrupt_str
+                })
+
+                break
         
     
 
@@ -197,7 +206,7 @@ for index, row in df_kmers.iterrows():
     
 
 df = pd.DataFrame(inputs)
-df.to_csv("Input_gen_results.csv", index=False)
+df.to_csv(f"Input_gen_results_read_{NUM_READ}.csv", index=False)
 # file_name, extension = os.path.splitext(__file__)
 
 
