@@ -40,23 +40,64 @@ def get_string_difference(str1, str2):
             diff_count += max(i2 - i1, j2 - j1)
     return diff_count
 
+def get_homopolymer_len(str, idx):
+    ''' Get the number of repeating characters at the given idx for that string '''
+    begin, end = idx
+    char = str[idx]
+    len = 1
+
+    while (begin > 0 and str[begin - 1] == char):
+        len = len + 1
+        begin = begin - 1
+    
+    while (end < str(len) - 1 and str[end + 1] == char):
+        len = len + 1
+        end = end + 1
+
+    return len
+
+
 def is_homopolymer_single_indel(str1, str2):
     matcher = difflib.SequenceMatcher(None, str1, str2)
     diff_count = 0
+    in_homopolymer = 0
+    base_l = ""
+    tag_idx, homo_len = 0
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == 'equal':
             continue
         elif tag == 'replace':
             return False
         elif tag in ('insert', 'delete'):
+            # Check if this happened in a homopolymer
+            if tag == 'delete':
+                homo_len = get_homopolymer_len(str1, i1) 
+                if (homo_len >= 5):
+                    in_homopolymer = 1
+                    base_l = str[i1]
+
+            if tag == 'insert':
+                homo_len = get_homopolymer_len(str2, j1)
+                if (homo_len >= 5):
+                    in_homopolymer = 1
+                    base_l = str[j1]
+            
+            tag_idx = i1
+                
+          
+            
             diff_count += max(i2 - i1, j2 - j1)
-    return diff_count
+
+    if in_homopolymer and diff_count == 1:
+        return True, diff_count, homo_len, base_l, tag_idx # homo_len is the length of the longer version
+    
+    return False, diff_count
 
 ##############################
 ######## DATA CREATION #######
 ##############################
 
-NUM_READ = 4
+NUM_READ = 5
 
 # Load in data
 data_dir = "../data/reads/"
@@ -144,34 +185,27 @@ for index, row in df_kmers.iterrows():
 
             del clean_output_proxy, corrupted_output_proxy
 
-            if not is_homopolymer_single_indel(clean_str, corrupt_str):
+            if (not is_homopolymer_single_indel(clean_str, corrupt_str)[0]): # Check if it counts or not
                 print(f"Skipping: corruption with width {dampen_width_percent} and scale {scale_factor} changed more than one base.")
-                # print(f"Clean:  {clean_str}")
-                # print(f"Corrupt:{corrupt_str}")
                 continue
             
+            # Should count
+            is_true, diff_count, homo_len, base_l, tag_idx = is_homopolymer_single_indel(clean_str, corrupt_str)
             print(f"Possible success with width {dampen_width_percent} and scale {scale_factor}")
             print(f"Clean:  {clean_str}")
             print(f"Corrupt:{corrupt_str}")
 
-            min_strings = ['AAAA', 'CCCC', 'GGGG', 'TTTT']
-            for minstr in min_strings:
-                if minstr in clean_str and minstr in corrupt_str and (len(clean_str) - len(corrupt_str)):
             
-                    print(f"Possible success with noise idx {noise_idx} at relative index {i}")
-                    print(f"Clean:  {clean_str}")
-                    print(f"Corrupt:{corrupt_str}")
+            inputs.append({
+                **row.to_dict(),
+                "Dampen width": dampen_width_percent,
+                "Scale Factor": scale_factor,
+                "Clean string": clean_str,
+                "Corrupt_string": corrupt_str,
+                "Indel idx": tag_idx,
+                "Notes": f"{base_l} up to {homo_len} at idx {tag_idx}"
+            })
 
-                    inputs.append({
-                        **row.to_dict(),
-                        "Dampen width": dampen_width_percent,
-                        "Scale Factor": scale_factor,
-                        "Clean string": clean_str,
-                        "Corrupt_string": corrupt_str
-                    })
-
-                    break
-        
 
             
             

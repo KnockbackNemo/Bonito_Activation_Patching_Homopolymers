@@ -322,8 +322,6 @@ def get_clean_corrupt_signals(raw_standrd_signal, raw_start, raw_end, context_pa
 
     corrupt_chunk = clean_chunk.copy()
     
-    assert not np.isnan([raw_start, chunk_start, homo_len, dampen_width_percent]).any()
-
     # If the dampen_width_percent/scale factor are used, apply them to the chunk
     if (dampen_width_percent is not None and not np.isnan(dampen_width_percent) and 
         scale_factor is not None and not np.isnan(scale_factor)):
@@ -387,8 +385,10 @@ for NUM_READ in range(1, 2):
         try:
             raw_start = int(row['raw start idx'])
             raw_end = int(row['raw end idx'])
-            noise_idx = int(row.get('Noise idx', default=None))
-            insert_idx = int(row.get('Insert idx', default=None))
+            noise_idx, insert_idx = None
+            if not np.isnan(row.get('Noise idx', default=None)):
+                noise_idx = int(row.get('Noise idx', default=None))
+                insert_idx = int(row.get('Insert idx', default=None))
             dampen_width = float(row.get('Dampen width', default=None))
             scale_factor = float(row.get('Scale Factor', default=None))
             score_window_start_idx = int(row['Score window start idx'])
@@ -399,8 +399,10 @@ for NUM_READ in range(1, 2):
             raw_start = int(row.loc['raw start idx'].strip('[]'))
             raw_end = int(row.loc['raw end idx'].strip('[]'))
             num_bases = int(row.loc['num_bases'].strip('[]'))
-            noise_idx = int(row.get('Noise idx', default=None).strip('[]'))
-            insert_idx = int(row.get('Insert idx', default=None).strip('[]'))
+            noise_idx, insert_idx = None
+            if not np.isnan(row.get('Noise idx', default=None)):
+                noise_idx = int(row.get('Noise idx', default=None).strip('[]'))
+                insert_idx = int(row.get('Insert idx', default=None).strip('[]'))
             dampen_width = float(row.get('Dampen width', default=None).strip('[]'))
             scale_factor = float(row.get('Scale Factor', default=None).strip('[]'))
             score_window_start_idx = int(row.loc['Score window start idx'].strip('[]'))
