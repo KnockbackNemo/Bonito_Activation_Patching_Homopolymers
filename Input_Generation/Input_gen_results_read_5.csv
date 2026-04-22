@@ -1,0 +1,3 @@
+base,num_bases,duration_viterbi,raw start idx,raw end idx,input_base_timestamps,Dampen width,Scale Factor,Clean string,Corrupt_string,Indel idx,Notes,Noise idx,Insert idx
+['G'],[4],[20],[6852],[6972],"[6852, 6864, 6870, 6876]",0.1,0.3,AAGGCGGGAAGGGGGAAAAGC,AAGGCGGGAAGGGGAAAAGC,14.0,G up to 5 at idx 14,,
+['G'],[4],[20],[6852],[6972],"[6852, 6864, 6870, 6876]",,,AAGGCGGGAAGGGGGAAAAGC,GCGCCGGGAGGGGCGGGGAAAAGC,,,250.0,200.0

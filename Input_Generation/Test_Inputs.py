@@ -40,21 +40,21 @@ def get_string_difference(str1, str2):
             diff_count += max(i2 - i1, j2 - j1)
     return diff_count
 
-def get_homopolymer_len(str, idx):
+def get_homopolymer_len(string, idx):
     ''' Get the number of repeating characters at the given idx for that string '''
-    begin, end = idx
-    char = str[idx]
-    len = 1
+    begin = end = idx
+    char = string[idx]
+    length = 1
 
-    while (begin > 0 and str[begin - 1] == char):
-        len = len + 1
+    while (begin > 0 and string[begin - 1] == char):
+        length = length + 1
         begin = begin - 1
     
-    while (end < str(len) - 1 and str[end + 1] == char):
-        len = len + 1
+    while (end < len(string) - 1) and string[end + 1] == char:
+        length = length + 1
         end = end + 1
 
-    return len
+    return length
 
 
 def is_homopolymer_single_indel(str1, str2):
@@ -62,25 +62,25 @@ def is_homopolymer_single_indel(str1, str2):
     diff_count = 0
     in_homopolymer = 0
     base_l = ""
-    tag_idx, homo_len = 0
+    tag_idx, homo_len = 0, 0
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == 'equal':
             continue
         elif tag == 'replace':
-            return False
+            return (False, 0, 0, "", 0)
         elif tag in ('insert', 'delete'):
             # Check if this happened in a homopolymer
             if tag == 'delete':
                 homo_len = get_homopolymer_len(str1, i1) 
                 if (homo_len >= 5):
                     in_homopolymer = 1
-                    base_l = str[i1]
+                    base_l = str1[i1]
 
             if tag == 'insert':
                 homo_len = get_homopolymer_len(str2, j1)
                 if (homo_len >= 5):
                     in_homopolymer = 1
-                    base_l = str[j1]
+                    base_l = str2[j1]
             
             tag_idx = i1
                 
@@ -89,9 +89,9 @@ def is_homopolymer_single_indel(str1, str2):
             diff_count += max(i2 - i1, j2 - j1)
 
     if in_homopolymer and diff_count == 1:
-        return True, diff_count, homo_len, base_l, tag_idx # homo_len is the length of the longer version
+        return (True, diff_count, homo_len, base_l, tag_idx) # homo_len is the length of the longer version
     
-    return False, diff_count
+    return (False, diff_count, homo_len, base_l, tag_idx)
 
 ##############################
 ######## DATA CREATION #######
@@ -156,6 +156,7 @@ for index, row in df_kmers.iterrows():
     dampen_widths_percent = [0.1, 0.15, 0.2, 0.3, 0.4, 0.5]
     scale_factors = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
     for dampen_width_percent in dampen_widths_percent:
+        success = False
         for scale_factor in scale_factors:
 
             corrupt_chunk = clean_chunk.copy()
@@ -205,6 +206,10 @@ for index, row in df_kmers.iterrows():
                 "Indel idx": tag_idx,
                 "Notes": f"{base_l} up to {homo_len} at idx {tag_idx}"
             })
+            success = True
+            break
+        if success:
+                break
 
 
             
@@ -214,6 +219,8 @@ for index, row in df_kmers.iterrows():
     noise_size = 6
     noise_offset = -50
     # Try adding some noise
+
+    success = False
 
     for i in range(rel_homo_start, rel_homo_end - noise_size):
         corrupt_chunk = clean_chunk.copy()
@@ -240,133 +247,25 @@ for index, row in df_kmers.iterrows():
 
         if not is_homopolymer_single_indel(clean_str, corrupt_str):
             print(f"Skipping: corruption with noise idx {noise_idx} at relative index {i} changed more than one base.")
-            # print(f"Clean:  {clean_str}")
-            # print(f"Corrupt:{corrupt_str}")
             continue
 
-        min_strings = ['AAAA', 'CCCC', 'GGGG', 'TTTT']
-        for minstr in min_strings:
-            if minstr in clean_str and minstr in corrupt_str:
-        
-                print(f"Possible success with noise idx {noise_idx} at relative index {i}")
-                print(f"Clean:  {clean_str}")
-                print(f"Corrupt:{corrupt_str}")
+      
+        print(f"Possible success with noise idx {noise_idx} at relative index {i}")
+        print(f"Clean:  {clean_str}")
+        print(f"Corrupt:{corrupt_str}")
 
-                inputs.append({
-                    **row.to_dict(),
-                    "Noise idx": noise_idx,
-                    "Insert idx": i,
-                    "Clean string": clean_str,
-                    "Corrupt_string": corrupt_str
-                })
-
-                break
-        
-    
+        inputs.append({
+            **row.to_dict(),
+            "Noise idx": noise_idx,
+            "Insert idx": i,
+            "Clean string": clean_str,
+            "Corrupt_string": corrupt_str
+        })
+        success = True
+        break
 
         
     
 
 df = pd.DataFrame(inputs)
 df.to_csv(f"Input_gen_results_read_{NUM_READ}.csv", index=False)
-# file_name, extension = os.path.splitext(__file__)
-
-
-
-# string_clean = bonito_model.decode(clean_output[:, 0, :]) # Need to convert to a numpy array in memory
-# string_clean_viterbi = bonito_model.seqdist.viterbi(clean_output.to(dtype=torch.float32))
-# string_corrupted = bonito_model.decode(corrupted_output[:, 0, :]) 
-# string_corrupted_viterbi = bonito_model.seqdist.viterbi(corrupted_output.to(dtype=torch.float32))
-# string_patched = bonito_model.decode(patched_output[:, 0, :]) 
-# string_patched_viterbi = bonito_model.seqdist.viterbi(patched_output.to(dtype=torch.float32))
-
-
-
-# def viterbi_to_string(path):
-#     alphabet = ['N', 'A', 'C', 'G', 'T']
-#     str = ""
-#     for state in path:
-#         str += alphabet[state.item()]
-#     return str
-    
-
-# # print(f"Clean output string: {string_clean}", file=f)
-# # print(f"Corrupt output strn: {string_corrupted}", file=f)
-# # print(f"Patched output strn: {string_patched}", file=f)
-# # print(f"Origin output strng: {string_orig}", file=f)
-# print(f"string_clean:     {string_clean}")
-# print(f"string_corrupted: {string_corrupted}")
-# print(f"string_patched:   {string_patched}")
-# print(f"string_clean_viterbi: {viterbi_to_string(string_clean_viterbi)}")
-# print(f"string_corrupted_viterbi: {viterbi_to_string(string_corrupted_viterbi)}")
-# print(f"string_patched_viterbi: {viterbi_to_string(string_patched_viterbi)}")
-
-# # # Check signal
-# # plt.figure()
-# # plt.plot(chopped_corrupt_signal, label="Chopped signal", color='green')
-# # plt.plot(clean_signal, label="Clean signal", color='blue')
-# # plt.plot(corrupt_signal, label="Corrupted signal", color='red')
-# # plt.show()
-
-
-
-# raw_stndrd_signal = first_read.signal
-# chopped_clean_signal = raw_stndrd_signal.copy()
-# chopped_corrupt_signal = raw_stndrd_signal.copy()
-# # chopped_corrupt_signal[58175:58203] = chopped_corrupt_signal[69095:69123]# Umm we will ignore that the previous base might be different
-# chopped_corrupt_signal[69094:69124] = chopped_corrupt_signal[58174:58204]
-# # chopped_corrupt_signal = chopped_corrupt_signal[58000:58300]
-# # chopped_clean_signal = chopped_clean_signal[58000:58300]
-# chopped_corrupt_signal = chopped_corrupt_signal[69000:69300]
-# chopped_clean_signal = chopped_clean_signal[69000:69300]
-
-# clean_signal = chopped_clean_signal
-# corrupt_signal = chopped_corrupt_signal
-# LENGTH = 58300 - 58000
-# # 1,A,4,10,58164,58224,"[58164, 58188, 58200, 58212]"
-# # 1,A,5,10,69084,69144,"[69084, 69090, 69096, 69108, 69132]"
-# # Maybe try these two
-
-
-# # # Try 1,G,5,13,35214,35292,"[35214, 35232, 35268, 35274, 35280]"?
-# # # Try swapping into a different plateau from an otherwise similar area?
-
-
-# # # Chop data
-# # start_idx = 35150 # Skip beginning noise
-# # LENGTH = 250
-# # end_idx = start_idx + LENGTH
-# # raw_stndrd_signal = first_read.signal
-# # chopped_signal = raw_stndrd_signal[start_idx:end_idx]
-
-# # clean_signal = chopped_signal.copy()
-
-
-# # # Make fake signal spike
-# # # SPIKE_LEN = 8 # Even
-# # # SPIKE_MIDPOINT = 240
-# # # SPIKE_SURROUND_WIDTH = 50
-# # # NUM_TO_REPLACE = 0
-# # REPLACE_START = 35295 - start_idx
-# # # steal_base_start = 150 
-# # steal_base_len = 6 # Must be even
-# # steal_base_spike_start = 50
-
-# # # part_to_copy = clean_signal[steal_base_start:steal_base_start + steal_base_len]
-# # # part_to_copy = part_to_copy - 0.75*part_to_copy + part_to_copy.mean()
-# # part_for_spike = clean_signal[steal_base_spike_start:steal_base_spike_start + steal_base_len]
-
-# # Flatten the data around the spike area to make it look like a plateau
-
-
-# # Add spike
-# # spike = np.linspace(-3, 3, SPIKE_LEN)
-# # spike = -np.exp(-0.5 * spike**2) * .50
-# # corrupt_signal[SPIKE_MIDPOINT - int(SPIKE_LEN/2) : SPIKE_MIDPOINT + int(SPIKE_LEN/2)] += spike
-# # corrupt_signal[SPIKE_MIDPOINT - int(steal_base_len/2): SPIKE_MIDPOINT + int(steal_base_len/2)] = clean_signal[steal_base_start:steal_base_start+steal_base_len]
-
-# # Modify data to add a homopolymer and a spike
-
-# # clean_signal[REPLACE_START:REPLACE_START + NUM_TO_REPLACE*steal_base_len] = np.tile(part_to_copy, NUM_TO_REPLACE)
-# # corrupt_signal = clean_signal.copy()
-# # corrupt_signal[REPLACE_START : REPLACE_START + steal_base_len] = part_for_spike

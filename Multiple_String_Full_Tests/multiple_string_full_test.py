@@ -382,32 +382,24 @@ for NUM_READ in range(1, 2):
     df_inputpairs = pd.read_csv(csv_path)
 
     for index, row in df_inputpairs.iterrows():
-        try:
-            raw_start = int(row['raw start idx'])
-            raw_end = int(row['raw end idx'])
-            noise_idx, insert_idx = None
-            if not np.isnan(row.get('Noise idx', default=None)):
-                noise_idx = int(row.get('Noise idx', default=None))
-                insert_idx = int(row.get('Insert idx', default=None))
-            dampen_width = float(row.get('Dampen width', default=None))
-            scale_factor = float(row.get('Scale Factor', default=None))
-            score_window_start_idx = int(row['Score window start idx'])
-            score_window_end_idx = int(row['Score window end idx'])
-        
-        except (ValueError, KeyError): # Some of the files still have brackets in strings
-            base = row.loc['base']
-            raw_start = int(row.loc['raw start idx'].strip('[]'))
-            raw_end = int(row.loc['raw end idx'].strip('[]'))
-            num_bases = int(row.loc['num_bases'].strip('[]'))
-            noise_idx, insert_idx = None
-            if not np.isnan(row.get('Noise idx', default=None)):
-                noise_idx = int(row.get('Noise idx', default=None).strip('[]'))
-                insert_idx = int(row.get('Insert idx', default=None).strip('[]'))
-            dampen_width = float(row.get('Dampen width', default=None).strip('[]'))
-            scale_factor = float(row.get('Scale Factor', default=None).strip('[]'))
-            score_window_start_idx = int(row.loc['Score window start idx'].strip('[]'))
-            score_window_end_idx = int(row.loc['Score window end idx'].strip('[]'))
 
+        def safe_parse(val, cast_type):
+            if pd.isna(val):
+                return None
+            if isinstance(val, str):
+                val = val.strip('[]')
+            return cast_type(val)
+        
+
+        raw_start = safe_parse(row['raw start idx'], int)
+        raw_end = safe_parse(row['raw end idx'], int)
+        noise_idx = safe_parse(row.get('Noise idx', default=None), int)
+        insert_idx = safe_parse(row.get('Insert idx', default=None), int)
+        dampen_width = safe_parse(row.get('Dampen width', default=None), float)
+        scale_factor = safe_parse(row.get('Scale Factor', default=None), float)
+        score_window_start_idx = safe_parse(row['Score window start idx'], int)
+        score_window_end_idx = safe_parse(row['Score window end idx'], int)
+        
     
         clean_signal, corrupt_signal = get_clean_corrupt_signals(raw_stndrd_signal, raw_start, raw_end, 
                                                                  CONTEXT_PADDING, NOISE_SIZE, dampen_width, scale_factor, 
