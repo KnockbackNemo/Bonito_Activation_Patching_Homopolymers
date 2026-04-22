@@ -56,7 +56,7 @@ def is_homopolymer_single_indel(str1, str2):
 ######## DATA CREATION #######
 ##############################
 
-NUM_READ = 3
+NUM_READ = 4
 
 # Load in data
 data_dir = "../data/reads/"

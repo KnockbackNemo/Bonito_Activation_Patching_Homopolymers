@@ -322,9 +322,11 @@ def get_clean_corrupt_signals(raw_standrd_signal, raw_start, raw_end, context_pa
 
     corrupt_chunk = clean_chunk.copy()
     
+    assert not np.isnan([raw_start, chunk_start, homo_len, dampen_width_percent]).any()
 
     # If the dampen_width_percent/scale factor are used, apply them to the chunk
-    if dampen_width_percent is not None and scale_factor is not None:
+    if (dampen_width_percent is not None and not np.isnan(dampen_width_percent) and 
+        scale_factor is not None and not np.isnan(scale_factor)):
         dampen_radius = int((homo_len / 2) * dampen_width_percent)
         local_mean = np.mean(corrupt_chunk[midpoint - dampen_radius : midpoint + dampen_radius])
         corrupt_chunk[midpoint - dampen_radius : midpoint + dampen_radius] = ( 
@@ -333,7 +335,8 @@ def get_clean_corrupt_signals(raw_standrd_signal, raw_start, raw_end, context_pa
     
 
     # If the noise offset and source look valid, apply those
-    if insert_idx is not None and noise_idx is not None:
+    if (insert_idx is not None and not np.isnan(insert_idx) and
+        noise_idx is not None and not np.isnan(noise_idx)):
         corrupt_chunk[insert_idx : insert_idx + NOISE_SIZE] = corrupt_chunk[noise_idx : noise_idx + noise_size]
 
     return clean_chunk, corrupt_chunk
@@ -370,14 +373,14 @@ reads = reader.get_reads(
 CONTEXT_PADDING = 200 # Hardcoded value from other file #TODO make more modular and independent
 NOISE_SIZE = 6
 
-for NUM_READ in range(1, 8):
+for NUM_READ in range(1, 2):
 
     # Grab the very first read
     first_read = next(reads)
     raw_stndrd_signal = first_read.signal
 
     # Get the corresponding csv
-    csv_path = (f"../Input_gen_indel_results_read_{NUM_READ}.csv") ## Change this to match the name
+    csv_path = (f"./Inputs_Tagged/Input_gen_indel_results_read_{NUM_READ}.csv") ## Change this to match the name
     df_inputpairs = pd.read_csv(csv_path)
 
     for index, row in df_inputpairs.iterrows():
