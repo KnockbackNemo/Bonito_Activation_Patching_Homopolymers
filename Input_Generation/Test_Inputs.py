@@ -93,7 +93,7 @@ def is_homopolymer_single_indel(str1, str2):
             diff_count += max(i2 - i1, j2 - j1)
 
     if in_homopolymer and diff_count == 1:
-        return (True, str1_hlen, str2_hlen, base_l, hbegin_idx) # homo_len is the length of the longer version
+        return (True, str1_hlen, str2_hlen, base_l, hbegin_idx)
     
     return (False, 0, 0, "", 0)
 

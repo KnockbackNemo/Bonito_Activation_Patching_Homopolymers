@@ -75,14 +75,22 @@ def is_homopolymer_single_indel(str1, str2):
             if tag == 'delete':
                 str1_hlen, str1_hbegin, str1_hend = get_homopolymer_len(str1, i1)
                 if (str1_hlen >= 5):
-                    str2_hlen, str2_hbegin, str2_hend = get_homopolymer_len(str2, str1_hbegin)
+                    if str1_hbegin >= len(str2):
+                        str2_hlen, str2_hbegin, str2_hend = 0, 0, 0
+                    else:
+                        str2_hlen, str2_hbegin, str2_hend = get_homopolymer_len(str2, str1_hbegin)
+                    
                     in_homopolymer = 1
                     base_l = str1[i1]
 
             if tag == 'insert':
                 str2_hlen, str2_hbegin, str2_hend = get_homopolymer_len(str2, j1) 
                 if (str2_hlen >= 5):
-                    str1_hlen, str1_hbegin, str1_hend = get_homopolymer_len(str1, str2_hbegin)
+                    if str2_hbegin >= len(str1):
+                        str1_hlen, str1_hbegin, str1_hend = 0, 0, 0
+                    else:
+                        str1_hlen, str1_hbegin, str1_hend = get_homopolymer_len(str1, str2_hbegin)
+                    
                     in_homopolymer = 1
                     base_l = str2[j1]
                         
@@ -104,7 +112,7 @@ def safe_parse(val, cast_type):
 ######## DATA CREATION #######
 ##############################
 
-NUM_READ = 1
+NUM_READ = 3
 
 # Load in data
 data_dir = "../data/reads/"
