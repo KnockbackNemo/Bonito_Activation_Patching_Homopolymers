@@ -40,8 +40,10 @@ def get_string_difference(str1, str2):
             diff_count += max(i2 - i1, j2 - j1)
     return diff_count
 
+
 def get_homopolymer_len(string, idx):
-    ''' Get the number of repeating characters at the given idx for that string '''
+    ''' Get the number of repeating characters at the given idx for that string
+    and return the length, starting idx, and ending idx '''
     begin = end = idx
     char = string[idx]
     length = 1
@@ -54,7 +56,7 @@ def get_homopolymer_len(string, idx):
         length = length + 1
         end = end + 1
 
-    return length
+    return (length, begin, end)
 
 
 def is_homopolymer_single_indel(str1, str2):
@@ -71,29 +73,31 @@ def is_homopolymer_single_indel(str1, str2):
         elif tag in ('insert', 'delete'):
             # Check if this happened in a homopolymer
             if tag == 'delete':
-                str1_hlen = get_homopolymer_len(str1, i1)
+                str1_hlen, str1_hbegin, str1_hend = get_homopolymer_len(str1, i1)
                 if (str1_hlen >= 5):
-                    str2_hlen = get_homopolymer_len(str2, j1)
+                    if str1_hbegin >= len(str2):
+                        str2_hlen, str2_hbegin, str2_hend = 0, 0, 0
+                    else:
+                        str2_hlen, str2_hbegin, str2_hend = get_homopolymer_len(str2, str1_hbegin)
+                    
                     in_homopolymer = 1
                     base_l = str1[i1]
-                    hbegin_idx = i1 - str2_hlen
 
             if tag == 'insert':
-                str2_hlen = get_homopolymer_len(str2, j1) 
+                str2_hlen, str2_hbegin, str2_hend = get_homopolymer_len(str2, j1) 
                 if (str2_hlen >= 5):
-                    str1_hlen = get_homopolymer_len(str1, i1)
+                    if str2_hbegin >= len(str1):
+                        str1_hlen, str1_hbegin, str1_hend = 0, 0, 0
+                    else:
+                        str1_hlen, str1_hbegin, str1_hend = get_homopolymer_len(str1, str2_hbegin)
+                    
                     in_homopolymer = 1
                     base_l = str2[j1]
-                    hbegin_idx = j1 - str1_hlen
-            
-          
-                
-          
-            
+                        
             diff_count += max(i2 - i1, j2 - j1)
 
     if in_homopolymer and diff_count == 1:
-        return (True, str1_hlen, str2_hlen, base_l, hbegin_idx)
+        return (True, str1_hlen, str2_hlen, base_l, str1_hbegin) # homo_len is the length of the longer version
     
     return (False, 0, 0, "", 0)
 
@@ -108,7 +112,7 @@ def safe_parse(val, cast_type):
 ######## DATA CREATION #######
 ##############################
 
-NUM_READ = 5
+NUM_READ = 1
 
 # Load in data
 data_dir = "../data/reads/"

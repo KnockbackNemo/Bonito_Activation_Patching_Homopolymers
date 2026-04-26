@@ -71,23 +71,28 @@ def run_patching_sweep(model, source_input, target_input, check_output_timestamp
               
 
     ####### Run the actual patching ########################
+    
+    ### Get source activations ###
+    source_acts_cache = {}
+    with model.trace(source_input):
+        for layer_idx in range(num_layers):
+            layer = model.encoder.transformer_encoder[layer_idx]
+            if component == "mlp":
+                source_acts_cache[layer_idx] = layer.ff.fc2.output.save()
+            elif component == "attn":
+                source_acts_cache[layer_idx] = layer.self_attn.output[0].save()
+            elif component == "head":
+                source_acts_cache[layer_idx] = layer.self_attn.out_proj.input[0].save()
+            elif component == "layer":
+                source_acts_cache[layer_idx] = layer.output[0].save()
+
+    for k in source_acts_cache:
+        source_acts_cache[k] = source_acts_cache[k].detach()
+
     for layer_idx in range(num_layers):
         layer = model.encoder.transformer_encoder[layer_idx]
 
-        ### Get source activations ###
-        with model.trace(source_input):
-            if component == "mlp":
-                src_act_proxy = layer.ff.fc2.output.save()
-            elif component == "attn":
-                src_act_proxy = layer.self_attn.output[0].save()
-            elif component == "head":
-                src_act_proxy = layer.self_attn.out_proj.input[0].save()
-            elif component == "layer":
-                src_act_proxy = layer.output[0].save()
-
-
-        src_act = src_act_proxy.detach()
-        del src_act_proxy
+        src_act = source_acts_cache[layer_idx]
 
         ### Patch target ###
         for time_offset, t in enumerate(range(patch_start, patch_end)):
@@ -131,15 +136,17 @@ def run_patching_sweep(model, source_input, target_input, check_output_timestamp
                     layer.self_attn.out_proj.input = patched 
 
                 elif component == "layer":
-                model.encoder.transformer_encoder[layer_idx].output[0][start:end, :] = src_act[start:end, :]
+                    model.encoder.transformer_encoder[layer_idx].output[0][start:end, :] = src_act[start:end, :]
 
 
 
                 patched_scores_proxy = model.output.save()
 
             patched_scores = patched_scores_proxy.detach()
+            patched_posteriors = bonito_model.seqdist.posteriors(patched_scores.to(torch.float32)) + 1e-8
 
             ####### Calculate metrics ##########
+
             for timestep in check_output_timestamps_list:
                 target_transition_idx = torch.argmax(source_output[timestep, 0, :]).item() # Note that "target" now means correct instead of "corrupted string"
                 wrong_transition_idx = torch.argmax(target_output[timestep, 0, :]).item() 
@@ -159,9 +166,6 @@ def run_patching_sweep(model, source_input, target_input, check_output_timestamp
                 target_string = transition_idx_to_str(target_transition_idx)
                 wrong_string = transition_idx_to_str(wrong_transition_idx)
                 actual_string = transition_idx_to_str(actual_max_pred_idx)
-
-                # Posteriors and strings - this includes global most likely path calculations #TODO There is definitely a cleaner way to do this
-                patched_posteriors = bonito_model.seqdist.posteriors(patched_scores.to(torch.float32)) + 1e-8
                 
                 reuse_logit_transitions = torch.argmax(source_posteriors[timestep, 0, :]).item() == torch.argmax(target_posteriors[timestep, 0, :]).item()
 
@@ -368,6 +372,15 @@ def get_clean_corrupt_signals(raw_standrd_signal, raw_start, raw_end, context_pa
 
     return clean_chunk, corrupt_chunk
 
+def check_if_run_exists(file_name, read_idx, row_idx, component, timestamps):
+    folder_path = f"patch_results/{file_name}/read_{read_idx}/row_{row_idx}"
+    for step in timestamps:
+        csv_filename = f"R{read_idx}r{row_idx}_{component}_data_step_{step}.csv"
+        csv_full_path = os.path.join(folder_path, csv_filename)
+        if not os.path.exists(csv_full_path):
+            return False
+    return True
+
 def time_to_output_idx(x) -> int:
     return x // 6 # CNN has stride of 3, 2, and 2, linear upsample has scale factor of 2
 
@@ -455,7 +468,7 @@ for current_read_idx, read_data in enumerate(reads, start=1):
 
 
     for index, row in df_inputpairs.iterrows():
-        
+
 
         def safe_parse(val, cast_type):
             if pd.isna(val):
@@ -529,49 +542,80 @@ for current_read_idx, read_data in enumerate(reads, start=1):
         timestamps_to_score = range(score_window_start_idx, score_window_end_idx)
         # Call patching sweep function and get heatmap_data things to plot
 
+
         # Denoising
-        layer_recovery = run_patching_sweep(model, clean_input, corrupted_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
-            PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="layer", metric_mode="recovery")
-        plot_and_save_outputs(layer_recovery, component="layer_denoising", folder_name=current_read_idx, index=index, plot=True)
+        if not check_if_run_exists(file_name, current_read_idx, index, "layer_denoising", timestamps_to_score):
+            layer_recovery = run_patching_sweep(model, clean_input, corrupted_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
+                PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="layer", metric_mode="recovery")
+            plot_and_save_outputs(layer_recovery, component="layer_denoising", folder_name=current_read_idx, index=index, plot=True)
+        else:
+            print(f"Skipping layer_denoising for Read {current_read_idx} Row {index}: Files already exist")
 
-        mlp_recovery = run_patching_sweep(model, clean_input, corrupted_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
-            PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="mlp", metric_mode="recovery")
-        plot_and_save_outputs(mlp_recovery, component="mlp_denoising", folder_name=current_read_idx, index=index, plot=True)
+        if not check_if_run_exists(file_name, current_read_idx, index, "mlp_denoising", timestamps_to_score):
+            mlp_recovery = run_patching_sweep(model, clean_input, corrupted_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
+                PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="mlp", metric_mode="recovery")
+            plot_and_save_outputs(mlp_recovery, component="mlp_denoising", folder_name=current_read_idx, index=index, plot=True)
+        else:
+            print(f"Skipping mlp_denoising for Read {current_read_idx} Row {index}: Files already exist")
         
-        attn_recovery = run_patching_sweep(model, clean_input, corrupted_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
-            PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="attn", metric_mode="recovery")
-        plot_and_save_outputs(attn_recovery, component="attn_denoising", folder_name=current_read_idx, index=index, plot=True)
-
+        if not check_if_run_exists(file_name, current_read_idx, index, "attn_denoising", timestamps_to_score):
+            attn_recovery = run_patching_sweep(model, clean_input, corrupted_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
+                PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="attn", metric_mode="recovery")
+            plot_and_save_outputs(attn_recovery, component="attn_denoising", folder_name=current_read_idx, index=index, plot=True)
+        else:
+            print(f"Skipping attn_denoising for Read {current_read_idx} Row {index}: Files already exist")
+ 
 
         head_recoveries = []
         NUM_HEADS = 8
         for h in range(NUM_HEADS):
             # print(f"Sweeping head {h} denoising...")
-            head_recoveries.append(run_patching_sweep(model, clean_input, corrupted_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
-                PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="head", head_idx=h, metric_mode="recovery"))
-            plot_and_save_outputs(head_recoveries[h], component=f"head {h} denoising", folder_name=current_read_idx, index=index)
+            if not check_if_run_exists(file_name, current_read_idx, index, f"head {h} denoising", timestamps_to_score):
 
+                head_recoveries.append(run_patching_sweep(model, clean_input, corrupted_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
+                    PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="head", head_idx=h, metric_mode="recovery"))
+                plot_and_save_outputs(head_recoveries[h], component=f"head {h} denoising", folder_name=current_read_idx, index=index)
+            else:
+                print(f"Skipping head {h} denoising for Read {current_read_idx} Row {index}: Files already exist")
+ 
             
         # Noising
-        layer_degradation = run_patching_sweep(model, corrupted_input, clean_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
-            PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="layer", metric_mode="degradation")
-        plot_and_save_outputs(layer_degradation, component="layer_noising", folder_name=current_read_idx, index=index)
+        if not check_if_run_exists(file_name, current_read_idx, index, "layer_noising", timestamps_to_score):
+            layer_degradation = run_patching_sweep(model, corrupted_input, clean_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
+                PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="layer", metric_mode="degradation")
+            plot_and_save_outputs(layer_degradation, component="layer_noising", folder_name=current_read_idx, index=index)
+        else:
+            print(f"Skipping layer_noising for Read {current_read_idx} Row {index}: Files already exist")
+ 
 
-        mlp_degradation = run_patching_sweep(model, corrupted_input, clean_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
-            PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="mlp", metric_mode="degradation")
-        plot_and_save_outputs(mlp_degradation, component="mlp_noising", folder_name=current_read_idx, index=index)
-        
-        attn_degradation = run_patching_sweep(model, corrupted_input, clean_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
-            PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="attn", metric_mode="degradation")
-        plot_and_save_outputs(attn_degradation, component="attn_noising", folder_name=current_read_idx, index=index, plot=True)
+        if not check_if_run_exists(file_name, current_read_idx, index, "mlp_noising", timestamps_to_score):
+            mlp_degradation = run_patching_sweep(model, corrupted_input, clean_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
+                PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="mlp", metric_mode="degradation")
+            plot_and_save_outputs(mlp_degradation, component="mlp_noising", folder_name=current_read_idx, index=index)
+        else:
+            print(f"Skipping mlp_noising for Read {current_read_idx} Row {index}: Files already exist")
+
+
+        if not check_if_run_exists(file_name, current_read_idx, index, "attn_noising", timestamps_to_score):
+            attn_degradation = run_patching_sweep(model, corrupted_input, clean_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
+                PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="attn", metric_mode="degradation")
+            plot_and_save_outputs(attn_degradation, component="attn_noising", folder_name=current_read_idx, index=index, plot=True)
+        else:
+            print(f"Skipping attn_noising for Read {current_read_idx} Row {index}: Files already exist")
+ 
 
         head_degradations = []
         NUM_HEADS = 8
         for h in range(NUM_HEADS):
             # print(f"Sweeping head {h} noising...")
-            head_degradations.append(run_patching_sweep(model, corrupted_input, clean_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
-                PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="head", head_idx=h, metric_mode="degradation"))
-            plot_and_save_outputs(head_degradations[h], component=f"head {h} noising", folder_name=current_read_idx, index=index)
+            if not check_if_run_exists(file_name, current_read_idx, index, f"head {h} noising", timestamps_to_score):
+
+                head_degradations.append(run_patching_sweep(model, corrupted_input, clean_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
+                    PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="head", head_idx=h, metric_mode="degradation"))
+                plot_and_save_outputs(head_degradations[h], component=f"head {h} noising", folder_name=current_read_idx, index=index)
+            else:
+                print(f"Skipping head {h} noising for Read {current_read_idx} Row {index}: Files already exist")
+ 
 
         # (End of row loop)
         gc.collect()
