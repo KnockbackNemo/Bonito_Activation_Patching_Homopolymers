@@ -48,34 +48,62 @@ def get_homopolymer_len(string, idx):
 
     return (length, begin, end)
 
-def is_single_isolated_deletion(str1, str2):
+def is_strictly_one_indel_in_chopped_slice(str1, str2, target_base=None):
     """
-    Checks if str2 is exactly str1 with ONE deletion, 
-    and ensures that the deleted base has a homopolymer length of EXACTLY 1 in str1.
+    Compares two decoded strings.
+    Returns True ONLY if there is exactly 1 isolated deletion OR 1 isolated insertion,
+    and ensures that neither the deleted nor inserted base is part of a homopolymer.
     """
     matcher = difflib.SequenceMatcher(None, str1, str2)
     opcodes = matcher.get_opcodes()
     
-    # We expect exactly 3 opcodes for a single deletion: ['equal', 'delete', 'equal']
-    if len([tag for tag, _, _, _, _ in opcodes if tag != 'equal']) != 1:
-        return False, 0, ""
-        
+    error_count = 0
+    error_base = ""
+    target_idx = -1
+    error_type = ""
+    str2_insert_idx = -1
+    
     for tag, i1, i2, j1, j2 in opcodes:
-        if tag == 'delete':
-            # 1. Check it's only one base deleted
-            if (i2 - i1) != 1:
-                return False, 0, ""
-            
-            # 2. Check the true length in the DECODED string (str1)
-            str1_hlen, str1_hbegin, str1_hend = get_homopolymer_len(str1, i1)
-            
-            # 3. STRICT CHECK: Must be length 1 (an isolated base, not a homopolymer)
-            if str1_hlen == 1:
-                deleted_base = str1[i1]
-                return True, i1, deleted_base
+        if tag == 'equal':
+            continue
+        elif tag == 'delete':
+            # Check if it's exactly a 1-base deletion
+            if (i2 - i1) == 1:
+                error_count += 1
+                target_idx = i1
+                error_base = str1[i1]
+                error_type = "delete"
+            else:
+                return False, 0, "" 
+        elif tag == 'insert':
+            # Check if it's exactly a 1-base insertion
+            if (j2 - j1) == 1:
+                error_count += 1
+                target_idx = i1 # We log the index relative to the clean string
+                str2_insert_idx = j1 # We track the corrupt string index for the homopolymer check
+                error_base = str2[j1]
+                error_type = "insert"
             else:
                 return False, 0, ""
+        else:
+            # We found a 'replace' or complex error
+            return False, 0, "" 
             
+    # If we found exactly one 1-base error, verify homopolymer rules
+    if error_count == 1:
+        
+        if error_type == "delete":
+            # For deletions, check the clean string
+            hlen, _, _ = get_homopolymer_len(str1, target_idx)
+        elif error_type == "insert":
+            # For insertions, check the corrupt string!
+            hlen, _, _ = get_homopolymer_len(str2, str2_insert_idx)
+        
+        # Must be length 1 (an isolated base)
+        if hlen == 1:
+            if target_base is None or error_base == target_base:
+                return True, target_idx, error_base
+                
     return False, 0, ""
 
 ##############################
@@ -172,43 +200,75 @@ for chunk_idx, chunk_start in enumerate(range(0, len(raw_stndrd_signal) - chunks
             continue
             
         for scale in scales:
-            corrupted_input = clean_input.clone()
             
-            # FIX 2: Correctly slice the 3D tensor [batch=0, channel=0, sequence_start:sequence_end]
-            corrupted_input[0, 0, start_idx:end_idx] = corrupted_input[0, 0, start_idx:end_idx] * scale
+            # 1. APPLY NOISE FIRST (Create corrupted_input)
+            corrupted_chunk = chunk.copy()
+            homo_len = end_idx - start_idx
+            dampen_radius = max(1, int((homo_len / 2) * 1.0)) 
+            midpoint = (start_idx + end_idx) // 2
+            local_mean = np.mean(corrupted_chunk[midpoint - dampen_radius : midpoint + dampen_radius])
             
-            with model.trace(corrupted_input):
-                corrupted_output_proxy = model.output.save()
-                
-            corrupt_str = bonito_model.decode(corrupted_output_proxy.detach()[:, 0, :])
+            corrupted_chunk[midpoint - dampen_radius : midpoint + dampen_radius] = ( 
+                (corrupted_chunk[midpoint - dampen_radius : midpoint + dampen_radius] * scale) 
+                + (local_mean * (1-scale))
+            )
+            corrupted_input = torch.tensor(corrupted_chunk, dtype=model_dtype).view(1, 1, chunksize).to(device)
+
+            # 2. MATCH RUN_PATCHES.PY CHOPPING LOGIC EXACTLY
+            abs_start = chunk_start + start_idx
+            abs_end = chunk_start + end_idx
             
-            is_valid, hbegin_idx, base_l = is_single_isolated_deletion(clean_str, corrupt_str)
+            CONTEXT_PADDING = 200
+            # We calculate boundaries relative to the 4000-tick chunk
+            slice_start = max(0, start_idx - CONTEXT_PADDING)
+            slice_end = min(chunksize, end_idx + CONTEXT_PADDING)
+            
+            # 3. CHOP
+            chopped_clean_input = clean_input[:, :, slice_start:slice_end]
+            chopped_corrupt_input = corrupted_input[:, :, slice_start:slice_end]
+            
+            # 4. DECODE CLEAN CHOPPED SLICE
+            with model.trace(chopped_clean_input):
+                chopped_clean_proxy = model.output.save()
+            chopped_clean_str = bonito_model.decode(chopped_clean_proxy.detach()[:, 0, :])
+            
+            # 5. DECODE CORRUPT CHOPPED SLICE
+            with model.trace(chopped_corrupt_input):
+                chopped_corrupt_proxy = model.output.save()
+            chopped_corrupt_str = bonito_model.decode(chopped_corrupt_proxy.detach()[:, 0, :])
+            
+            # 6. COMPARE
+            is_valid, hbegin_idx, base_l = is_strictly_one_indel_in_chopped_slice(
+                chopped_clean_str, 
+                chopped_corrupt_str, 
+                target_base=cand['base']
+            )
 
             if is_valid:
-                print(f"Success! Negative Control deletion of {base_l} at string idx {hbegin_idx}")
+                print(f"Success! Negative Control error on {base_l} at string idx {hbegin_idx}")
                 
                 records.append({
                     'base': f"['{base_l}']",
                     'num_bases': '[1]',
                     'duration_viterbi': cand['end_t'] - cand['start_t'],
-                    'raw start idx': chunk_start + start_idx, 
-                    'raw end idx': chunk_start + end_idx,
-                    'input_base_timestamps': f"[{chunk_start + start_idx}]",
+                    'raw start idx': abs_start, 
+                    'raw end idx': abs_end,
+                    'input_base_timestamps': f"[{abs_start}]",
                     'Dampen width': 1.0,
                     'Scale Factor': scale,
-                    'Clean string': clean_str,
-                    'Corrupt_string': corrupt_str,
+                    'Clean string': chopped_clean_str,       # Fixed to use chopped string
+                    'Corrupt_string': chopped_corrupt_str,   # Fixed to use chopped string
                     'H Begin Idx': hbegin_idx, 
                     'Base Letter': base_l,
                     'Clean H-er Length': 1, 
                     'Corrupt H-er Length': 0,
-                    'Type': "Deletion",
-                    'Corruption Start Raw': chunk_start + start_idx,
-                    'Corruption End Raw': chunk_start + end_idx,
+                    'Type': "Negative_Control",
+                    'Corruption Start Raw': abs_start,
+                    'Corruption End Raw': abs_end,
                     'Noise source idx': "Negative_Control",
                     'Insert idx': "N/A"
                 })
-                break 
+                break
 
     del clean_output_proxy
 

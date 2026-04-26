@@ -13,7 +13,7 @@ from bonito.reader import Reader, read_chunks
 from nnsight import NNsight
 from dataclasses import dataclass
 from pathlib import Path
-
+#TODO: Look at what gets skipped vs when the logits are used?
 
 ##############################
 ######## MODEL SETUP #########
@@ -373,13 +373,17 @@ def get_clean_corrupt_signals(raw_standrd_signal, raw_start, raw_end, context_pa
     return clean_chunk, corrupt_chunk
 
 def check_if_run_exists(file_name, read_idx, row_idx, component, timestamps):
+    ''' Only looks at the read & row level, not the timestep level. If any timesteps have been run,
+    it won't run again, so you may need to be careful about missing timesteps. '''
     folder_path = f"patch_results/{file_name}/read_{read_idx}/row_{row_idx}"
+    found_at_least_one_timestep = False
     for step in timestamps:
         csv_filename = f"R{read_idx}r{row_idx}_{component}_data_step_{step}.csv"
         csv_full_path = os.path.join(folder_path, csv_filename)
-        if not os.path.exists(csv_full_path):
-            return False
-    return True
+        if os.path.exists(csv_full_path):
+            found_at_least_one_timestep = True
+    
+    return found_at_least_one_timestep
 
 def time_to_output_idx(x) -> int:
     return x // 6 # CNN has stride of 3, 2, and 2, linear upsample has scale factor of 2
@@ -523,14 +527,17 @@ for current_read_idx, read_data in enumerate(reads, start=1):
         print(f"Clean string: {string_clean}")
         print(f"Corrupted string: {string_corrupted}")
 
-        score_window_start_idx = base_to_output_idx_guess(h_recorded_begin_idx) # We just take a guess at where to patch- we'll look at the brightest spot in this area
-        score_window_end_idx = base_to_output_idx_guess(h_recorded_begin_idx + max(clean_recorded_hmer_len, corrupt_recorded_hmer_len))
-
+        max_time_idx = clean_output.shape[0]
+        score_window_start_idx = min(base_to_output_idx_guess(h_recorded_begin_idx), clean_output.shape[0] - 1) # We just take a guess at where to patch- we'll look at the brightest spot in this area
+        
+        raw_end_guess = base_to_output_idx_guess(h_recorded_begin_idx + max(clean_recorded_hmer_len, corrupt_recorded_hmer_len))
+        score_window_end_idx = min(raw_end_guess, max_time_idx)
+        
         # Run sweep of all layers using a timestep of 1
         NUM_T_LAYERS = 18
         TRANSFORMER_SCORE_WINDOW_PATCH_BUFFER = 6 # Patch the area surrounding the score window (score window = around where we patched)
         PATCHING_SWEEP_WINDOW_START_IDX = max(0, output_to_transformer_idx(score_window_start_idx) - TRANSFORMER_SCORE_WINDOW_PATCH_BUFFER) 
-        PATCHING_SWEEP_WINDOW_END_IDX = min(time_to_transformer_idx(clean_input.shape[-1]), output_to_transformer_idx(score_window_end_idx) + TRANSFORMER_SCORE_WINDOW_PATCH_BUFFER)
+        PATCHING_SWEEP_WINDOW_END_IDX = min(time_to_transformer_idx(clean_input.shape[-1]) - 1, output_to_transformer_idx(score_window_end_idx) + TRANSFORMER_SCORE_WINDOW_PATCH_BUFFER)
 
         NUM_TIMESTEP_SWEEPS = int(PATCHING_SWEEP_WINDOW_END_IDX - PATCHING_SWEEP_WINDOW_START_IDX)
 
