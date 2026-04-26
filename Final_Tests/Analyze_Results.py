@@ -76,6 +76,21 @@ def calculate_aie(df, score_column='Logit_Score'):
     aie_df.rename(columns={score_column: f'AIE_{score_column}'}, inplace=True)
     return aie_df
 
+def calculate_layerwise_aie(df, score_column='Logit_Score'):
+    """
+    Calculates the Layer-wise AIE regardless of exact timestep alignment.
+    First takes the max score across time for each read, then averages those 
+    max scores across all reads in the dataset.
+    """
+    # Step 1: Find the max effect for each layer within each individual read
+    max_per_read = df.groupby(['Read_ID', 'Layer'])[score_column].max().reset_index()
+    
+    # Step 2: Average those max effects across all reads to get the Layer-wise AIE
+    layerwise_aie = max_per_read.groupby('Layer')[score_column].mean().reset_index()
+    layerwise_aie.rename(columns={score_column: f'Layerwise_AIE_{score_column}'}, inplace=True)
+    
+    return layerwise_aie
+
 def calculate_max_scores(df):
     """Finds the maximum effect observed in each layer across all timesteps."""
     return df.groupby('Layer')[['Logit_Score', 'Posteriors_Score']].max().reset_index()
@@ -101,6 +116,84 @@ def plot_aie_heatmap(aie_df, score_column, component_name, metric_type, plot_dir
     plt.tight_layout()
     plt.savefig(plot_dir / f"aie_heatmap_{score_column.lower()}.png")
     plt.close()
+
+# def plot_layerwise_aie(layer_logit, layer_post, component_name, metric_type, plot_dir): ## Continuous
+#     """Plots the Layer-wise AIE independent of timestep alignment."""
+#     plt.figure(figsize=(10, 6))
+    
+#     plt.plot(layer_logit['Layer'], layer_logit['Layerwise_AIE_Logit_Score'], 
+#              label='Layer-wise AIE (Logits)', color='blue', marker='o')
+#     plt.plot(layer_post['Layer'], layer_post['Layerwise_AIE_Posteriors_Score'], 
+#              label='Layer-wise AIE (Posteriors)', color='orange', marker='s')
+
+    
+    # plt.title(f'Layer-wise Average Indirect Effect (Time-Independent)\n({component_name} | {metric_type})')
+    # plt.xlabel('Layer')
+    # plt.ylabel('Average Max Score Across Dataset')
+    # plt.legend()
+    # plt.grid(True, alpha=0.3)
+    # plt.tight_layout()
+    # plt.savefig(plot_dir / "layerwise_aie.png")
+    # plt.close()
+
+def plot_layerwise_aie(layer_logit, layer_post, component_name, metric_type, plot_dir):
+    """Plots the Layer-wise AIE using discrete bars to align perfectly with layers."""
+    # Merge the two dataframes for easier side-by-side plotting
+    merged = pd.merge(layer_logit, layer_post, on='Layer')
+    
+    plt.figure(figsize=(12, 6))
+    
+    # Set up discrete positions for the bars
+    x = np.arange(len(merged['Layer']))
+    bar_width = 0.35
+    
+    plt.bar(x - bar_width/2, merged['Layerwise_AIE_Logit_Score'], bar_width, label='Logits', color='#1f77b4')
+    plt.bar(x + bar_width/2, merged['Layerwise_AIE_Posteriors_Score'], bar_width, label='Posteriors', color='#ff7f0e')
+    
+    plt.title(f'Layer-wise Average Indirect Effect\n({component_name} | {metric_type})')
+    plt.xlabel('Layer')
+    plt.ylabel('Average Max Score Across Dataset')
+    
+    # Force the X-axis to only show the exact integer layer numbers
+    plt.xticks(x, merged['Layer'])
+    
+    plt.legend()
+    plt.grid(axis='y', alpha=0.3) # Only horizontal grid lines for bar charts
+    plt.tight_layout()
+    plt.savefig(plot_dir / "layerwise_aie_discrete.png")
+    plt.close()
+
+def plot_combined_components(all_layer_data, metric_type, score_type='Logit_Score', plot_dir=OUTPUT_DIR):
+    """
+    Plots the layer-wise AIE for MULTIPLE components on the same graph.
+    all_layer_data: Dict mapping component_name -> dataframe for that component
+    """
+    if not all_layer_data:
+        return
+        
+    plt.figure(figsize=(12, 6))
+    
+    for component_name, df in all_layer_data.items():
+        col_name = f'Layerwise_AIE_{score_type}'
+        # We use a line plot with markers here to avoid cluttered bar charts with 3+ components
+        plt.plot(df['Layer'], df[col_name], label=component_name.upper(), marker='o', linewidth=2)
+    
+    plt.title(f'Combined Components Layer-wise AIE: {score_type}\n({metric_type})')
+    plt.xlabel('Layer')
+    plt.ylabel('Average Max Score Across Dataset')
+    
+    # Force discrete integer ticks based on the first dataset
+    sample_df = list(all_layer_data.values())[0]
+    plt.xticks(sample_df['Layer'])
+    
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    
+    plot_dir.mkdir(parents=True, exist_ok=True)
+    plt.savefig(plot_dir / f"combined_layerwise_{score_type.lower()}_{metric_type}.png")
+    plt.close()
+
 
 def plot_aie_over_time(aie_df_logit, aie_df_post, component_name, metric_type, plot_dir):
     """Plots the AIE averaged over all layers for each time offset."""
@@ -152,34 +245,57 @@ def plot_bar_metrics(df, component_name, metric_type, plot_dir):
 # 4. MAIN ORCHESTRATOR
 # ==========================================
 def analyze_component(component_name, metric_type):
-    """Orchestrates data loading, calculation, and plotting."""
-    
-    # 1. Load Data
+    """Orchestrates data loading, calculation, and plotting, AND returns the layerwise data."""
     df = load_and_preprocess_data(component_name, metric_type)
     if df is None:
-        return
+        return None, None
 
-    # Create output directory
     plot_dir = OUTPUT_DIR / f"{component_name}_{metric_type}_aggregated_plots"
     plot_dir.mkdir(parents=True, exist_ok=True)
 
-    # 2. Calculate AIE for both Logits and Posteriors
     aie_logits = calculate_aie(df, score_column='Logit_Score')
     aie_posteriors = calculate_aie(df, score_column='Posteriors_Score')
+    layerwise_aie_logits = calculate_layerwise_aie(df, score_column='Logit_Score')
+    layerwise_aie_posteriors = calculate_layerwise_aie(df, score_column='Posteriors_Score')
 
-    # 3. Generate Plots
     plot_aie_heatmap(aie_logits, 'Logit_Score', component_name, metric_type, plot_dir)
     plot_aie_heatmap(aie_posteriors, 'Posteriors_Score', component_name, metric_type, plot_dir)
-    
     plot_aie_over_time(aie_logits, aie_posteriors, component_name, metric_type, plot_dir)
-    
     plot_bar_metrics(df, component_name, metric_type, plot_dir)
+    
+    # Use the new discrete plotting function
+    plot_layerwise_aie(layerwise_aie_logits, layerwise_aie_posteriors, component_name, metric_type, plot_dir)
 
-    print(f"✅ Analysis complete for {component_name} {metric_type}. Plots saved to {plot_dir}\n")
+    print(f"✅ Analysis complete for {component_name} {metric_type}.\n")
+    
+    # Return the layerwise data so we can combine it later
+    return layerwise_aie_logits, layerwise_aie_posteriors
 
-# Example usage:
+
 if __name__ == "__main__":
-    # Test sweeps
-    analyze_component("mlp", "recovery")
-    analyze_component("mlp", "degradation")
-    analyze_component("attn", "recovery")
+    # Dictionaries to hold data for the combined plots
+    combined_recovery_logits = {}
+    combined_recovery_posts = {}
+    
+    # List the components you want to analyze and compare
+    components = ["mlp", "attn", "layer"]
+    components += [f"head {h}" for h in range(7)]
+
+    metric_types = ["noising", "denoising"]
+
+    for metric in metric_types:
+    
+        for comp in components:
+            logits_df, posts_df = analyze_component(comp, metric)
+            
+            if logits_df is not None and posts_df is not None:
+                combined_recovery_logits[comp] = logits_df
+                combined_recovery_posts[comp] = posts_df
+                
+        # Generate the global overlay plots!
+        plot_combined_components(combined_recovery_logits, metric_type=metric, score_type="Logit_Score")
+        plot_combined_components(combined_recovery_posts, metric_type=metric, score_type="Posteriors_Score")
+        
+    print("✅ Combined plots generated successfully in the main output directory.")
+
+
