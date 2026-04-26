@@ -38,7 +38,7 @@ model_dtype = next(model.parameters()).dtype #torch.float16
 ##############################
 ########  FILE SETUP #########
 ##############################
-file_name, extension = os.path.splitext(__file__)
+file_name = Path(__file__).stem
 
 
 ##############################
@@ -50,6 +50,7 @@ def run_patching_sweep(model, source_input, target_input, check_output_timestamp
     """
     component options: "layer", "mlp", "attn", "head"
     """
+    print(f"Sweeping {component} {metric_mode}...")
 
     # Each row is a patch (differ in layer #, component type, & timestep)
     results = []
@@ -65,6 +66,9 @@ def run_patching_sweep(model, source_input, target_input, check_output_timestamp
 
     ## Calculate some stats
     global_mse_baseline_diff = torch.nn.functional.mse_loss(source_output.to(torch.float32), target_output.to(torch.float32)).item()
+    source_posteriors = bonito_model.seqdist.posteriors(source_output.to(torch.float32)) + 1e-8
+    target_posteriors = bonito_model.seqdist.posteriors(target_output.to(torch.float32)) + 1e-8
+              
 
     ####### Run the actual patching ########################
     for layer_idx in range(num_layers):
@@ -79,7 +83,7 @@ def run_patching_sweep(model, source_input, target_input, check_output_timestamp
             elif component == "head":
                 src_act_proxy = layer.self_attn.out_proj.input[0].save()
             elif component == "layer":
-                src_act_proxy = layer.output.save()
+                src_act_proxy = layer.output[0].save()
 
 
         src_act = src_act_proxy.detach()
@@ -127,10 +131,7 @@ def run_patching_sweep(model, source_input, target_input, check_output_timestamp
                     layer.self_attn.out_proj.input = patched 
 
                 elif component == "layer":
-                    target = layer.output[0].clone()
-                    assert target.numel() == seq_len * d_model
-                    target[start:end, :] = src_act[start:end, :]
-                    layer.output[0] = target
+                model.encoder.transformer_encoder[layer_idx].output[0][start:end, :] = src_act[start:end, :]
 
 
 
@@ -146,6 +147,9 @@ def run_patching_sweep(model, source_input, target_input, check_output_timestamp
                 logit_diff_target = target_output[timestep,0,target_transition_idx] - target_output[timestep,0,wrong_transition_idx]
                 baseline_logit_diff = logit_diff_source - logit_diff_target
 
+                if baseline_logit_diff == 0:
+                    continue
+
 
                 ### Get additional metrics ###
                 # Logits and strings
@@ -157,15 +161,18 @@ def run_patching_sweep(model, source_input, target_input, check_output_timestamp
                 actual_string = transition_idx_to_str(actual_max_pred_idx)
 
                 # Posteriors and strings - this includes global most likely path calculations #TODO There is definitely a cleaner way to do this
-                source_posteriors = bonito_model.seqdist.posteriors(source_output.to(torch.float32)) + 1e-8
-                target_posteriors = bonito_model.seqdist.posteriors(target_output.to(torch.float32)) + 1e-8
                 patched_posteriors = bonito_model.seqdist.posteriors(patched_scores.to(torch.float32)) + 1e-8
-                posteriors_target_transition_idx = torch.argmax(source_posteriors[timestep, 0, :]).item()
-                posteriors_wrong_transition_idx = torch.argmax(target_posteriors[timestep, 0, :]).item()
+                
+                reuse_logit_transitions = torch.argmax(source_posteriors[timestep, 0, :]).item() == torch.argmax(target_posteriors[timestep, 0, :]).item()
+
+                posteriors_target_transition_idx = target_transition_idx if reuse_logit_transitions else torch.argmax(source_posteriors[timestep, 0, :]).item() 
+                posteriors_wrong_transition_idx = wrong_transition_idx if reuse_logit_transitions else torch.argmax(target_posteriors[timestep, 0, :]).item()
                 posteriors_actual_transition_idx = torch.argmax(patched_posteriors[timestep, 0, :]).item()
+                
                 target_state_prob = patched_posteriors[timestep, 0, posteriors_target_transition_idx]
                 wrong_state_prob = patched_posteriors[timestep, 0, posteriors_wrong_transition_idx]
                 actual_state_prob = patched_posteriors[timestep, 0, posteriors_actual_transition_idx]
+                
                 posteriors_target_string = transition_idx_to_str(posteriors_target_transition_idx)
                 posteriors_wrong_string = transition_idx_to_str(posteriors_wrong_transition_idx)
                 posteriors_actual_string = transition_idx_to_str(posteriors_actual_transition_idx) 
@@ -206,7 +213,7 @@ def run_patching_sweep(model, source_input, target_input, check_output_timestamp
                 is_target_logit_argmax = actual_max_pred_idx == target_transition_idx
                 is_target_prob_argmax = posteriors_actual_transition_idx == posteriors_target_transition_idx
                 global_mse_diff = torch.nn.functional.mse_loss(source_output.to(torch.float32), patched_scores.to(torch.float32)).item()
-                # should_decode = not is_target_logit_argmax or not is_target_prob_argmax or (global_mse_diff > global_mse_baseline_diff)
+                should_decode = not is_target_logit_argmax or not is_target_prob_argmax or (global_mse_diff > global_mse_baseline_diff)
 
                 # string = None
                 # if should_decode:
@@ -248,51 +255,59 @@ def run_patching_sweep(model, source_input, target_input, check_output_timestamp
 
             del patched_scores_proxy, patched_scores
 
-    return pd.DataFrame(results)
+    if not results:
+        # Return an empty DF with the expected columns to prevent KeyErrors
+        return pd.DataFrame(columns=["Layer", "Time_Offset", "Target_Timestep", "Logit_Score"])
+    else:
+        return pd.DataFrame(results)
 
     
 # Plot results
 def plot_and_save_outputs(df, component="mlp", folder_name="default", index="none", plot=False):
+
+    if df.empty:
+        print(f"Skipping plot/save for {component}: No differences found (DataFrame empty).")
+        return
     
-        # Plot and save each timestep individually
-        for step in df['Target_Timestep'].unique():
+    # Plot and save each timestep individually
+    for step in df['Target_Timestep'].unique():
 
-            step_df = df[df['Target_Timestep'] == step]
+        step_df = df[df['Target_Timestep'] == step]
 
-            folder_path = f"patch_results/{file_name}/read_{folder_name}/row_{index}"
-            
-            csv_filename = (f"R{folder_name}r{index}_{component}_data_step_{step}.csv")
-            csv_full_path = os.path.join(folder_path, csv_filename) 
+        folder_path = f"patch_results/{file_name}/read_{folder_name}/row_{index}"
+        
+        csv_filename = (f"R{folder_name}r{index}_{component}_data_step_{step}.csv")
+        csv_full_path = os.path.join(folder_path, csv_filename) 
 
-            os.makedirs(folder_path, exist_ok=True)
+        os.makedirs(folder_path, exist_ok=True)
 
-            ### Plotting skipped by default since there are so many runs
-            if plot:
-                # Logit heatmaps
-                png_filename = (f"R{folder_name}r{index}_{component}_logit_heatmap_results_stp_{step}.png")
-                png_full_path = os.path.join(folder_path, png_filename) 
-                heatmap_matrix = step_df.pivot(index="Layer", columns="Time_Offset", values="Logit_Score")
-                plt.figure()
-                sns.heatmap(heatmap_matrix)
-                plt.title(f"{component} logit heatmap results timestep {step}")
-                plt.xlabel(f"Time ticks")
-                plt.ylabel(f"Layer")
-                plt.savefig(png_full_path)
-                plt.close()
+        ### Plotting skipped by default since there are so many runs
+        if plot:
+            # Logit heatmaps
+            png_filename = (f"R{folder_name}r{index}_{component}_logit_heatmap_results_stp_{step}.png")
+            png_full_path = os.path.join(folder_path, png_filename) 
+            heatmap_matrix = step_df.pivot(index="Layer", columns="Time_Offset", values="Logit_Score")
+            plt.figure()
+            sns.heatmap(heatmap_matrix)
+            plt.title(f"{component} logit heatmap results timestep {step}")
+            plt.xlabel(f"Time ticks")
+            plt.ylabel(f"Layer")
+            plt.savefig(png_full_path)
+            plt.close()
 
-                # Probabilitiy heatmaps
-                png_filename = (f"{component}_posteriors_heatmap_results_stp_{step}.png")
-                png_full_path = os.path.join(folder_path, png_filename) 
-                heatmap_matrix = step_df.pivot(index="Layer", columns="Time_Offset", values="Posteriors_Score")
-                plt.figure()
-                sns.heatmap(heatmap_matrix)
-                plt.title(f"{component} posteriors heatmap results timestep {step}")
-                plt.xlabel(f"Time ticks")
-                plt.ylabel(f"Layer")
-                plt.savefig(png_full_path)
-                plt.close()
-          
-            step_df.to_csv(csv_full_path, index=False)
+            # Probabilitiy heatmaps
+            png_filename = (f"R{folder_name}r{index}_{component}_posteriors_heatmap_results_stp_{step}.png")
+            png_full_path = os.path.join(folder_path, png_filename) 
+            heatmap_matrix = step_df.pivot(index="Layer", columns="Time_Offset", values="Posteriors_Score")
+            plt.figure()
+            sns.heatmap(heatmap_matrix)
+            plt.title(f"{component} posteriors heatmap results timestep {step}")
+            plt.xlabel(f"Time ticks")
+            plt.ylabel(f"Layer")
+            plt.savefig(png_full_path)
+            plt.close()
+        
+        step_df.to_csv(csv_full_path, index=False)
 
 def transition_idx_to_str(transition_idx: int):
     alphabet = model.seqdist.alphabet
@@ -339,6 +354,7 @@ def get_clean_corrupt_signals(raw_standrd_signal, raw_start, raw_end, context_pa
     if (dampen_width_percent is not None and not np.isnan(dampen_width_percent) and 
         scale_factor is not None and not np.isnan(scale_factor)):
         dampen_radius = int((homo_len / 2) * dampen_width_percent)
+        dampen_radius = max(1, dampen_radius)
         local_mean = np.mean(corrupt_chunk[midpoint - dampen_radius : midpoint + dampen_radius])
         corrupt_chunk[midpoint - dampen_radius : midpoint + dampen_radius] = ( 
             (corrupt_chunk[midpoint - dampen_radius : midpoint + dampen_radius] * scale_factor) \
@@ -361,6 +377,13 @@ def time_to_transformer_idx(x) -> int:
 def output_to_transformer_idx(x) -> int:
     return x // 2 # CNN has stride of 3, 2, and 2
 
+def base_to_output_idx_guess(x) -> int:
+    return x * 2
+
+def base_to_transformer_idx_guess(x) -> int:
+    return x
+
+
 
 ##############################
 ######## DATA CREATION ####### #TODO: We will want to load in reads generated from somewhere else instead probably
@@ -371,19 +394,19 @@ def output_to_transformer_idx(x) -> int:
 
 # Load in data
 data_dir = "./data/reads/"
-input_dir = Path("./data/pairs")
+input_dir = Path("./data/pairs/")
 
 # Scan csvs to see which reads we want
 available_csvs = {}
 
 for csv_path in input_dir.glob("*.csv"):
-    match = re.search(r'read_(d+)', csv_path.name)
+    match = re.search(r'read_(\d+)', csv_path.name)
     if match:
         available_csvs[int(match.group(1))] = csv_path
 
 max_target_read = max(available_csvs.keys(), default=0)
 
-print(f"Found CSVs for reads: {list(available_csvs.keys())}")
+print(f"Found CSVs for reads: {list(available_csvs.keys())}, {list(available_csvs.values())}")
 
 reader = Reader(data_dir)
 
@@ -401,19 +424,38 @@ NOISE_SIZE = 6
 # Iterate through each read and, if we have a csv for it, perform patching on the reads
 for current_read_idx, read_data in enumerate(reads, start=1):
 
-    if not current_read_idx in available_csvs:
+    ################ CSV Loading ################
+    if not (current_read_idx in available_csvs):
         continue
 
-    # A csv exists, so read the data
     print(f"\n--- Processing Read {current_read_idx} ---")
 
     csv_path = available_csvs[current_read_idx]
+
+    ## Skip if the file is empty
+    if os.path.getsize(csv_path) == 0:
+        print(f"Skipping {csv_path.name}: File is empty.")
+        continue
+
+    try:
+        df_inputpairs = pd.read_csv(csv_path)
+    
+        if df_inputpairs.empty:
+            print(f"Skipping {csv_path.name}: No data rows found.")
+            continue
+            
+    except pd.errors.EmptyDataError:
+        print(f"Skipping {csv_path.name}: EmptyDataError (file likely corrupted or empty).")
+        continue
+
+
+    ##### Read signal and run a patch job for each input pair (each row of the csv)! #####
+
     raw_stndrd_signal = read_data.signal
 
-    # dataframe contains the list of requested input segments in this read
-    df_inputpairs = pd.read_csv(csv_path)
 
     for index, row in df_inputpairs.iterrows():
+        
 
         def safe_parse(val, cast_type):
             if pd.isna(val):
@@ -428,7 +470,7 @@ for current_read_idx, read_data in enumerate(reads, start=1):
         raw_end = safe_parse(row['raw end idx'], int)
         dampen_width = safe_parse(row.get('Dampen width', default=None), float)
         scale_factor = safe_parse(row.get('Scale Factor', default=None), float)
-        noise_idx = safe_parse(row.get('Noise idx', default=None), int)
+        noise_idx = safe_parse(row.get('Noise source idx', default=None), int)
         insert_idx = safe_parse(row.get('Insert idx', default=None), int)
         clean_recorded_string = safe_parse(row['Clean string'], str)
         corrupt_recorded_string = safe_parse(row['Corrupt_string'], str)
@@ -468,8 +510,8 @@ for current_read_idx, read_data in enumerate(reads, start=1):
         print(f"Clean string: {string_clean}")
         print(f"Corrupted string: {string_corrupted}")
 
-        score_window_start_idx = time_to_output_idx(CONTEXT_PADDING)
-        score_window_end_idx = time_to_output_idx(raw_end - raw_start + CONTEXT_PADDING)
+        score_window_start_idx = base_to_output_idx_guess(h_recorded_begin_idx) # We just take a guess at where to patch- we'll look at the brightest spot in this area
+        score_window_end_idx = base_to_output_idx_guess(h_recorded_begin_idx + max(clean_recorded_hmer_len, corrupt_recorded_hmer_len))
 
         # Run sweep of all layers using a timestep of 1
         NUM_T_LAYERS = 18
@@ -488,50 +530,48 @@ for current_read_idx, read_data in enumerate(reads, start=1):
         # Call patching sweep function and get heatmap_data things to plot
 
         # Denoising
+        layer_recovery = run_patching_sweep(model, clean_input, corrupted_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
+            PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="layer", metric_mode="recovery")
+        plot_and_save_outputs(layer_recovery, component="layer_denoising", folder_name=current_read_idx, index=index, plot=True)
+
         mlp_recovery = run_patching_sweep(model, clean_input, corrupted_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
             PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="mlp", metric_mode="recovery")
+        plot_and_save_outputs(mlp_recovery, component="mlp_denoising", folder_name=current_read_idx, index=index, plot=True)
+        
         attn_recovery = run_patching_sweep(model, clean_input, corrupted_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
             PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="attn", metric_mode="recovery")
-        layer_recovery = run_patching_sweep(model, corrupted_input, clean_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
-            PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="layer", metric_mode="recovery")
+        plot_and_save_outputs(attn_recovery, component="attn_denoising", folder_name=current_read_idx, index=index, plot=True)
 
 
         head_recoveries = []
         NUM_HEADS = 8
         for h in range(NUM_HEADS):
-            print(f"Sweeping head {h} denoising...")
+            # print(f"Sweeping head {h} denoising...")
             head_recoveries.append(run_patching_sweep(model, clean_input, corrupted_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
                 PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="head", head_idx=h, metric_mode="recovery"))
             plot_and_save_outputs(head_recoveries[h], component=f"head {h} denoising", folder_name=current_read_idx, index=index)
 
             
         # Noising
-        mlp_degradation = run_patching_sweep(model, corrupted_input, clean_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
-            PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="mlp", metric_mode="degradation")
-        attn_degradation = run_patching_sweep(model, corrupted_input, clean_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
-            PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="attn", metric_mode="degradation")
         layer_degradation = run_patching_sweep(model, corrupted_input, clean_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
             PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="layer", metric_mode="degradation")
+        plot_and_save_outputs(layer_degradation, component="layer_noising", folder_name=current_read_idx, index=index)
+
+        mlp_degradation = run_patching_sweep(model, corrupted_input, clean_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
+            PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="mlp", metric_mode="degradation")
+        plot_and_save_outputs(mlp_degradation, component="mlp_noising", folder_name=current_read_idx, index=index)
         
+        attn_degradation = run_patching_sweep(model, corrupted_input, clean_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
+            PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="attn", metric_mode="degradation")
+        plot_and_save_outputs(attn_degradation, component="attn_noising", folder_name=current_read_idx, index=index, plot=True)
 
         head_degradations = []
         NUM_HEADS = 8
         for h in range(NUM_HEADS):
-            print(f"Sweeping head {h} noising...")
+            # print(f"Sweeping head {h} noising...")
             head_degradations.append(run_patching_sweep(model, corrupted_input, clean_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
                 PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="head", head_idx=h, metric_mode="degradation"))
             plot_and_save_outputs(head_degradations[h], component=f"head {h} noising", folder_name=current_read_idx, index=index)
-
-
-        # Plot denoising
-        plot_and_save_outputs(mlp_recovery, component="mlp_denoising", folder_name=current_read_idx, index=index, plot=True)
-        plot_and_save_outputs(attn_recovery, component="attn_denoising", folder_name=current_read_idx, index=index, plot=True)
-        plot_and_save_outputs(layer_recovery, component="layer_denoising", folder_name=current_read_idx, index=index, plot=True)
-
-        # Plot noising
-        plot_and_save_outputs(mlp_degradation, component="mlp_noising", folder_name=current_read_idx, index=index)
-        plot_and_save_outputs(attn_degradation, component="attn_noising", folder_name=current_read_idx, index=index, plot=True)
-        plot_and_save_outputs(layer_degradation, component="layer_noising", folder_name=current_read_idx, index=index)
 
         # (End of row loop)
         gc.collect()
