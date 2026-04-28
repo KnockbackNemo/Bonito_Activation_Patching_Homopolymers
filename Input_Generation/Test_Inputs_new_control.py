@@ -48,63 +48,108 @@ def get_homopolymer_len(string, idx):
 
     return (length, begin, end)
 
-def is_strictly_one_indel_in_chopped_slice(str1, str2, target_base=None):
+# def is_strictly_one_indel_in_chopped_slice(str1, str2, target_base=None):
+#     """
+#     Compares two decoded strings.
+#     Returns True ONLY if there is exactly 1 isolated deletion OR 1 isolated insertion,
+#     and ensures that neither the deleted nor inserted base is part of a homopolymer.
+#     """
+#     matcher = difflib.SequenceMatcher(None, str1, str2)
+#     opcodes = matcher.get_opcodes()
+    
+#     error_count = 0
+#     error_base = ""
+#     target_idx = -1
+#     error_type = ""
+#     str2_insert_idx = -1
+    
+#     for tag, i1, i2, j1, j2 in opcodes:
+#         if tag == 'equal':
+#             continue
+#         elif tag == 'delete':
+#             # Check if it's exactly a 1-base deletion
+#             if (i2 - i1) == 1:
+#                 error_count += 1
+#                 target_idx = i1
+#                 error_base = str1[i1]
+#                 error_type = "delete"
+#             else:
+#                 return False, 0, "" 
+#         elif tag == 'insert':
+#             # Check if it's exactly a 1-base insertion
+#             if (j2 - j1) == 1:
+#                 error_count += 1
+#                 target_idx = i1 # We log the index relative to the clean string
+#                 str2_insert_idx = j1 # We track the corrupt string index for the homopolymer check
+#                 error_base = str2[j1]
+#                 error_type = "insert"
+#             else:
+#                 return False, 0, ""
+#         else:
+#             # We found a 'replace' or complex error
+#             return False, 0, "" 
+            
+#     # If we found exactly one 1-base error, verify homopolymer rules
+#     if error_count == 1:
+        
+#         if error_type == "delete":
+#             # For deletions, check the clean string
+#             hlen, _, _ = get_homopolymer_len(str1, target_idx)
+#         elif error_type == "insert":
+#             # For insertions, check the corrupt string!
+#             hlen, _, _ = get_homopolymer_len(str2, str2_insert_idx)
+        
+#         # Must be length 1 (an isolated base)
+#         if hlen == 1:
+#             if target_base is None or error_base == target_base:
+#                 return True, target_idx, error_base
+                
+#     return False, 0, ""
+
+def is_strictly_one_replacement_in_chopped_slice(str1, str2, target_base=None):
     """
-    Compares two decoded strings.
-    Returns True ONLY if there is exactly 1 isolated deletion OR 1 isolated insertion,
-    and ensures that neither the deleted nor inserted base is part of a homopolymer.
+    Returns True ONLY if there is exactly 1 isolated base substitution (e.g., A -> G).
+    Ensures that neither the original base nor the new base creates a homopolymer.
     """
     matcher = difflib.SequenceMatcher(None, str1, str2)
     opcodes = matcher.get_opcodes()
     
     error_count = 0
-    error_base = ""
+    clean_base = ""
+    corrupt_base = ""
     target_idx = -1
-    error_type = ""
-    str2_insert_idx = -1
     
     for tag, i1, i2, j1, j2 in opcodes:
         if tag == 'equal':
             continue
-        elif tag == 'delete':
-            # Check if it's exactly a 1-base deletion
-            if (i2 - i1) == 1:
+        elif tag == 'replace':
+            # Check if exactly 1 base was replaced by exactly 1 base
+            if (i2 - i1) == 1 and (j2 - j1) == 1:
                 error_count += 1
                 target_idx = i1
-                error_base = str1[i1]
-                error_type = "delete"
+                clean_base = str1[i1]
+                corrupt_base = str2[j1]
             else:
-                return False, 0, "" 
-        elif tag == 'insert':
-            # Check if it's exactly a 1-base insertion
-            if (j2 - j1) == 1:
-                error_count += 1
-                target_idx = i1 # We log the index relative to the clean string
-                str2_insert_idx = j1 # We track the corrupt string index for the homopolymer check
-                error_base = str2[j1]
-                error_type = "insert"
-            else:
-                return False, 0, ""
+                return False, 0, "", ""
         else:
-            # We found a 'replace' or complex error
-            return False, 0, "" 
+            # Reject if there are any insertions or deletions anywhere
+            return False, 0, "", "" 
             
-    # If we found exactly one 1-base error, verify homopolymer rules
+    # If we found exactly one 1-base replacement, verify homopolymer rules
     if error_count == 1:
         
-        if error_type == "delete":
-            # For deletions, check the clean string
-            hlen, _, _ = get_homopolymer_len(str1, target_idx)
-        elif error_type == "insert":
-            # For insertions, check the corrupt string!
-            hlen, _, _ = get_homopolymer_len(str2, str2_insert_idx)
+        # Check the clean string to ensure it's an isolated base
+        hlen1, _, _ = get_homopolymer_len(str1, target_idx)
+        # Check the corrupt string to ensure the NEW letter didn't accidentally form a homopolymer
+        hlen2, _, _ = get_homopolymer_len(str2, target_idx)
         
-        # Must be length 1 (an isolated base)
-        if hlen == 1:
-            if target_base is None or error_base == target_base:
-                return True, target_idx, error_base
+        # BOTH must be length 1 (isolated bases)
+        if hlen1 == 1 and hlen2 == 1:
+            if target_base is None or clean_base == target_base:
+                # Return both bases so you can log the mutation (e.g., A -> G)
+                return True, target_idx, clean_base, corrupt_base
                 
-    return False, 0, ""
+    return False, 0, "", ""
 
 ##############################
 ######## MAIN LOOP ###########
@@ -238,17 +283,23 @@ for chunk_idx, chunk_start in enumerate(range(0, len(raw_stndrd_signal) - chunks
             chopped_corrupt_str = bonito_model.decode(chopped_corrupt_proxy.detach()[:, 0, :])
             
             # 6. COMPARE
-            is_valid, hbegin_idx, base_l = is_strictly_one_indel_in_chopped_slice(
+            is_valid, hbegin_idx, clean_l, corrupt_l = is_strictly_one_replacement_in_chopped_slice(
                 chopped_clean_str, 
                 chopped_corrupt_str, 
                 target_base=cand['base']
             )
 
             if is_valid:
-                print(f"Success! Negative Control error on {base_l} at string idx {hbegin_idx}")
+                print(f"Success! Negative Control Substitution: {clean_l} mutated to {corrupt_l} at string idx {hbegin_idx}")
                 
+                # Update your records dictionary:
+                # 'Base Letter': f"{clean_l}->{corrupt_l}",
+                # 'Type': "Negative_Control_Substitution",
+
                 records.append({
-                    'base': f"['{base_l}']",
+                    # 'base': f"['{base_l}']",
+                    'clean base': clean_l,
+                    'corrupt base': corrupt_l,
                     'num_bases': '[1]',
                     'duration_viterbi': cand['end_t'] - cand['start_t'],
                     'raw start idx': abs_start, 
@@ -259,7 +310,7 @@ for chunk_idx, chunk_start in enumerate(range(0, len(raw_stndrd_signal) - chunks
                     'Clean string': chopped_clean_str,       # Fixed to use chopped string
                     'Corrupt_string': chopped_corrupt_str,   # Fixed to use chopped string
                     'H Begin Idx': hbegin_idx, 
-                    'Base Letter': base_l,
+                    # 'Base Letter': base_l,
                     'Clean H-er Length': 1, 
                     'Corrupt H-er Length': 0,
                     'Type': "Negative_Control",

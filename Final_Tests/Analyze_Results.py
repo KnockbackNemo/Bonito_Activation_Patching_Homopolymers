@@ -31,7 +31,12 @@ import seaborn as sns
 from pathlib import Path
 import os
 
-OUTPUT_DIR = Path("./patch_results")
+RUN_CONTROL = True ## TToggle this to choose between running the results on Control vs Experimental
+
+if RUN_CONTROL:
+    OUTPUT_DIR = Path("./patch_results_control") ## Change this to choose between 
+else:
+    OUTPUT_DIR = Path("./patch_results") ## Change this to choose between 
 
 # ==========================================
 # 1. DATA LOADING
@@ -51,6 +56,13 @@ def load_and_preprocess_data(component_name, metric_type, data_dir=OUTPUT_DIR):
     for file in csv_files:
         temp_df = pd.read_csv(file)
         temp_df['Source_File'] = file.name
+        
+        # Ensure scores are floats immediately
+        if temp_df.empty:
+            continue
+        
+        print(f"Found non-empty file {file}...")
+    # ... rest of your logic
         # Extract a Read ID (Assuming your files are named like 'R4r0_mlp_...')
         temp_df['Read_ID'] = file.name.split('_')[0] 
         df_list.append(temp_df)
