@@ -268,22 +268,24 @@ def run_patching_sweep(model, source_input, target_input, check_output_timestamp
     
 # Plot results
 def plot_and_save_outputs(df, component="mlp", folder_name="default", index="none", plot=False):
+        
+    folder_path = f"patch_results/{file_name}/read_{folder_name}/row_{index}"
+    os.makedirs(folder_path, exist_ok=True)
+    csv_filename = (f"R{folder_name}r{index}_{component}_data_step_{-1}.csv")
+
 
     if df.empty:
-        print(f"Skipping plot/save for {component}: No differences found (DataFrame empty).")
+        print(f"Skipping plot and making empty save for {component} (No differences found & DataFrame empty.)")
+        df.to_csv(os.path.join(folder_path, csv_filename), index=False) ## Make empty file to prevent re-running
         return
     
     # Plot and save each timestep individually
     for step in df['Target_Timestep'].unique():
 
         step_df = df[df['Target_Timestep'] == step]
-
-        folder_path = f"patch_results/{file_name}/read_{folder_name}/row_{index}"
         
         csv_filename = (f"R{folder_name}r{index}_{component}_data_step_{step}.csv")
         csv_full_path = os.path.join(folder_path, csv_filename) 
-
-        os.makedirs(folder_path, exist_ok=True)
 
         ### Plotting skipped by default since there are so many runs
         if plot:
@@ -382,7 +384,8 @@ def check_if_run_exists(file_name, read_idx, row_idx, component, timestamps):
         csv_full_path = os.path.join(folder_path, csv_filename)
         if os.path.exists(csv_full_path):
             found_at_least_one_timestep = True
-    
+    if not found_at_least_one_timestep:
+        print(f"No files found for folder path {folder_path} {component}")
     return found_at_least_one_timestep
 
 def time_to_output_idx(x) -> int:
@@ -573,15 +576,14 @@ for current_read_idx, read_data in enumerate(reads, start=1):
             print(f"Skipping attn_denoising for Read {current_read_idx} Row {index}: Files already exist")
  
 
-        head_recoveries = []
         NUM_HEADS = 8
         for h in range(NUM_HEADS):
             # print(f"Sweeping head {h} denoising...")
             if not check_if_run_exists(file_name, current_read_idx, index, f"head {h} denoising", timestamps_to_score):
 
-                head_recoveries.append(run_patching_sweep(model, clean_input, corrupted_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
+                head_recovery = (run_patching_sweep(model, clean_input, corrupted_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
                     PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="head", head_idx=h, metric_mode="recovery"))
-                plot_and_save_outputs(head_recoveries[h], component=f"head {h} denoising", folder_name=current_read_idx, index=index)
+                plot_and_save_outputs(head_recovery, component=f"head {h} denoising", folder_name=current_read_idx, index=index)
             else:
                 print(f"Skipping head {h} denoising for Read {current_read_idx} Row {index}: Files already exist")
  
@@ -611,15 +613,15 @@ for current_read_idx, read_data in enumerate(reads, start=1):
             print(f"Skipping attn_noising for Read {current_read_idx} Row {index}: Files already exist")
  
 
-        head_degradations = []
         NUM_HEADS = 8
         for h in range(NUM_HEADS):
             # print(f"Sweeping head {h} noising...")
             if not check_if_run_exists(file_name, current_read_idx, index, f"head {h} noising", timestamps_to_score):
 
-                head_degradations.append(run_patching_sweep(model, corrupted_input, clean_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
-                    PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="head", head_idx=h, metric_mode="degradation"))
-                plot_and_save_outputs(head_degradations[h], component=f"head {h} noising", folder_name=current_read_idx, index=index)
+                head_degradation = run_patching_sweep(model, corrupted_input, clean_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
+                    PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="head", head_idx=h, metric_mode="degradation")
+                
+                plot_and_save_outputs(head_degradation, component=f"head {h} noising", folder_name=current_read_idx, index=index)
             else:
                 print(f"Skipping head {h} noising for Read {current_read_idx} Row {index}: Files already exist")
  

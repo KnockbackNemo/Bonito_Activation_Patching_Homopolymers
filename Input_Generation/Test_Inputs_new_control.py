@@ -265,8 +265,8 @@ for chunk_idx, chunk_start in enumerate(range(0, len(raw_stndrd_signal) - chunks
                     'Type': "Negative_Control",
                     'Corruption Start Raw': abs_start,
                     'Corruption End Raw': abs_end,
-                    'Noise source idx': "Negative_Control",
-                    'Insert idx': "N/A"
+                    'Noise source idx': None,
+                    'Insert idx': None
                 })
                 break
 

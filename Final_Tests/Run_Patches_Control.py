@@ -155,6 +155,7 @@ def run_patching_sweep(model, source_input, target_input, check_output_timestamp
                 baseline_logit_diff = logit_diff_source - logit_diff_target
 
                 if baseline_logit_diff == 0:
+                    # print(f"Skipping timestep {timestep}: logit transition targets are the same.")
                     continue
 
 
@@ -269,21 +270,22 @@ def run_patching_sweep(model, source_input, target_input, check_output_timestamp
 # Plot results
 def plot_and_save_outputs(df, component="mlp", folder_name="default", index="none", plot=False):
 
+    folder_path = f"patch_results_control/{file_name}/read_{folder_name}/row_{index}"
+    os.makedirs(folder_path, exist_ok=True)
+    csv_filename = (f"R{folder_name}r{index}_{component}_data_step_{-1}.csv")
+
     if df.empty:
-        print(f"Skipping plot/save for {component}: No differences found (DataFrame empty).")
+        print(f"Skipping plot and making empty save for {component} (No differences found & DataFrame empty.)")
+        df.to_csv(os.path.join(folder_path, csv_filename), index=False) ## Make empty file to prevent re-running
         return
     
     # Plot and save each timestep individually
     for step in df['Target_Timestep'].unique():
 
         step_df = df[df['Target_Timestep'] == step]
-
-        folder_path = f"patch_results/{file_name}/read_{folder_name}/row_{index}"
         
         csv_filename = (f"R{folder_name}r{index}_{component}_data_step_{step}.csv")
         csv_full_path = os.path.join(folder_path, csv_filename) 
-
-        os.makedirs(folder_path, exist_ok=True)
 
         ### Plotting skipped by default since there are so many runs
         if plot:
@@ -375,7 +377,7 @@ def get_clean_corrupt_signals(raw_standrd_signal, raw_start, raw_end, context_pa
 def check_if_run_exists(file_name, read_idx, row_idx, component, timestamps):
     ''' Only looks at the read & row level, not the timestep level. If any timesteps have been run,
     it won't run again, so you may need to be careful about missing timesteps. '''
-    folder_path = f"patch_results/{file_name}/read_{read_idx}/row_{row_idx}"
+    folder_path = f"patch_results_control/{file_name}/read_{read_idx}/row_{row_idx}"
     found_at_least_one_timestep = False
     for step in timestamps:
         csv_filename = f"R{read_idx}r{row_idx}_{component}_data_step_{step}.csv"
