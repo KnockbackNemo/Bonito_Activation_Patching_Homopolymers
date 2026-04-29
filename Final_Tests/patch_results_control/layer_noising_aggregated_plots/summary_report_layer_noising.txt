@@ -1,0 +1,25 @@
+=== AGGREGATED SUMMARY REPORT: LAYER (NOISING) ===
+-----------------------------------------------------------------
+
+1. IMPACT ANALYSIS
+  - Max Average Logit Impact: Layer 6 (Score: 1.7290)
+  - Max Average Posteriors Impact: Layer 6 (Score: 1.8101)
+  - Highest String Flip Rate: Layer 0 (100.0% of reads flipped)
+
+2. DATASET PROFILE
+  - Total Individual Runs Analyzed: 2
+  - Origin Reads Used:
+      * Read 1: 1 run(s)
+      * Read 4: 1 run(s)
+
+  - Error Types Distributed:
+      * Negative_Control: 2 run(s)
+
+  - Clean Homopolymer Lengths:
+      * Length 1: 2 run(s)
+
+  - Base Letters Targeted:
+      * G: 1 run(s)
+      * C: 1 run(s)
+
+=================================================================

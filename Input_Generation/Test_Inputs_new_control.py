@@ -164,7 +164,7 @@ reads = reader.get_reads(
     norm_params=model.config.get("standardisation")
 )
 
-NUM_READ = 4
+NUM_READ = 5
 for i in range(1, NUM_READ):
     next(reads)
 first_read = next(reads)
