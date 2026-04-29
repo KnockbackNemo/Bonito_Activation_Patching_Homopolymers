@@ -297,8 +297,22 @@ def analyze_component(component_name, metric_type):
     df = load_and_preprocess_data(component_name, metric_type)
     if df is None:
         return None, None
+    
+    # --- ADD THIS TO FILTER ---
+    # Example: Only look at Poly-A reads
+    df = df[df['Base_Letter'] == 'A'] 
+    
+    # Or Example: Only look at deletions
+    # df = df[df['Error_Type'] == 'Deletion']
+    
+    # Or Example: Only look at long homopolymers
+    # df = df[df['Clean_Length'] >= 6]
 
-    plot_dir = OUTPUT_DIR / f"{component_name}_{metric_type}_aggregated_plots"
+    plot_dir = OUTPUT_DIR / f"filtered/{component_name}_{metric_type}_aggregated_plots_A"  ## For filtered runs
+    # --------------------------
+
+  
+    # plot_dir = OUTPUT_DIR / f"{component_name}_{metric_type}_aggregated_plots" ## For unfiltered plots
     plot_dir.mkdir(parents=True, exist_ok=True)
 
     aie_logits = calculate_aie(df, score_column='Logit_Score')

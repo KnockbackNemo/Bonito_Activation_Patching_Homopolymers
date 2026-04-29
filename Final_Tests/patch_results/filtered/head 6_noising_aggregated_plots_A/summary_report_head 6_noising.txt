@@ -1,0 +1,25 @@
+=== AGGREGATED SUMMARY REPORT: HEAD 6 (NOISING) ===
+-----------------------------------------------------------------
+
+1. IMPACT ANALYSIS
+  - Max Average Logit Impact: Layer 14 (Score: 1.1570)
+  - Max Average Posteriors Impact: Layer 17 (Score: 2.0050)
+  - Highest String Flip Rate: Layer 0 (100.0% of reads flipped)
+
+2. DATASET PROFILE
+  - Total Individual Runs Analyzed: 5
+  - Origin Reads Used:
+      * Read 1: 5 run(s)
+
+  - Error Types Distributed:
+      * Deletion: 4 run(s)
+      * Insertion: 1 run(s)
+
+  - Clean Homopolymer Lengths:
+      * Length 5: 4 run(s)
+      * Length 9: 1 run(s)
+
+  - Base Letters Targeted:
+      * A: 5 run(s)
+
+=================================================================
