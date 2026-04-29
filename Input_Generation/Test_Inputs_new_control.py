@@ -164,7 +164,7 @@ reads = reader.get_reads(
     norm_params=model.config.get("standardisation")
 )
 
-NUM_READ = 3
+NUM_READ = 4
 for i in range(1, NUM_READ):
     next(reads)
 first_read = next(reads)
@@ -248,8 +248,8 @@ for chunk_idx, chunk_start in enumerate(range(0, len(raw_stndrd_signal) - chunks
             
             # 1. APPLY NOISE FIRST (Create corrupted_input)
             corrupted_chunk = chunk.copy()
-            homo_len = end_idx - start_idx
-            dampen_radius = max(1, int((homo_len / 2) * 1.0)) 
+            hetero_len = end_idx - start_idx
+            dampen_radius = max(1, int((hetero_len / 2) * 1.0)) 
             midpoint = (start_idx + end_idx) // 2
             local_mean = np.mean(corrupted_chunk[midpoint - dampen_radius : midpoint + dampen_radius])
             

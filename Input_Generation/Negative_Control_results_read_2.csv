@@ -1,5 +1,2 @@
-base,num_bases,duration_viterbi,raw start idx,raw end idx,input_base_timestamps,Dampen width,Scale Factor,Clean string,Corrupt_string,H Begin Idx,Base Letter,Clean H-er Length,Corrupt H-er Length,Type,Corruption Start Raw,Corruption End Raw,Noise source idx,Insert idx
-['A'],[1],1,1432,1438,[1432],1.0,0.1,AGGGAGAGGCAACACAGGGAAGCCAGGAGGGCGACGA,AGGGAGAGGCAACACAGGGAAGCCAGGAGGGCGACG,36,A,1,0,Negative_Control,1432,1438,,
-['C'],[1],1,11422,11428,[11422],1.0,0.1,CAACCTGGGCCGCAATCCCAACAATACAAACATC,CAACCTGGGCCGCAATCCCAACAATACAAACAT,33,C,1,0,Negative_Control,11422,11428,,
-['G'],[1],1,11584,11590,[11584],1.0,0.1,TACAAACAGTACAAAACCTGAATATACCACTGCGCT,TACAAACAGTACAGAAACCTGAATATACCACTGCGCT,13,G,1,0,Negative_Control,11584,11590,,
-['G'],[1],1,12760,12766,[12760],1.0,0.2,CGCCCGCCCGGGACGGCCGCGCCGGACGGCTCGGCCGCCCCGCCGC,GCGCCCGCCCGGGACGGCCGCGCCGGACGGCTCGGCCGCCCCGCCGC,0,G,1,0,Negative_Control,12760,12766,,
+clean base,corrupt base,num_bases,duration_viterbi,raw start idx,raw end idx,input_base_timestamps,Dampen width,Scale Factor,Clean string,Corrupt_string,H Begin Idx,Clean H-er Length,Corrupt H-er Length,Type,Corruption Start Raw,Corruption End Raw,Noise source idx,Insert idx
+G,A,[1],1,8968,8974,[8968],1.0,0.2,GCCGGGACCACGGCGCCGGCTCCTAAC,ACCGGGACCACGGCGCCGGCTCCTAAC,0,1,0,Negative_Control,8968,8974,,
