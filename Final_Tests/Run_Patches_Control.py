@@ -136,8 +136,9 @@ def run_patching_sweep(model, source_input, target_input, check_output_timestamp
                     layer.self_attn.out_proj.input = patched 
 
                 elif component == "layer":
-                    model.encoder.transformer_encoder[layer_idx].output[0][start:end, :] = src_act[start:end, :]
-
+                    target = layer.output.clone()
+                    target[0][start:end, :] = src_act[start:end, :]
+                    layer.output=target
 
 
                 patched_scores_proxy = model.output.save()
@@ -476,12 +477,18 @@ for current_read_idx, read_data in enumerate(reads, start=1):
     for index, row in df_inputpairs.iterrows():
 
 
+        def try_get(col_name, cast_type):
+            if col_name not in row:
+                return None
+            return safe_parse(row.get(col_name, default=None), cast_type)
+
         def safe_parse(val, cast_type):
             if pd.isna(val):
                 return None
             if isinstance(val, str):
                 val = val.strip('[]')
             return cast_type(val)
+
         
 
         # Read the relevant columns (some of them are old data from the search process that aren't needed)
@@ -494,7 +501,9 @@ for current_read_idx, read_data in enumerate(reads, start=1):
         clean_recorded_string = safe_parse(row['Clean string'], str)
         corrupt_recorded_string = safe_parse(row['Corrupt_string'], str)
         h_recorded_begin_idx = safe_parse(row['H Begin Idx'], int)
-        base_recorded_letter = safe_parse(row['Base Letter'], str)
+        base_recorded_letter = try_get('Base Letter', str)
+        clean_base_recorded_letter = try_get('clean base', str)
+        corrupt_base_recorded_letter = try_get('corrupt base', str)
         clean_recorded_hmer_len = safe_parse(row['Clean H-er Length'], int)
         corrupt_recorded_hmer_len = safe_parse(row['Corrupt H-er Length'], int)
         error_recorded_type = safe_parse(row['Type'], str)

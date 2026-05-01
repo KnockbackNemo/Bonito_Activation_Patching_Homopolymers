@@ -15,11 +15,23 @@ import torch
 sns.set_context("paper", font_scale=1.2)
 sns.set_style("whitegrid")
 
+## My customization
+GENERATE_EXPERIMENTAL_ONLY = False
+GENERATE_MLP_ATN_LAYER_ONLY = False
+GENERATE_HEADS_ONLY = True
+
+
 DIR_EXP = Path("./patch_results")           
 DIR_CTRL = Path("./patch_results_control")  
-OUTPUT_DIR = Path("./comparative_analysis_outputs")
 
-GENERATE_ATTENTION_MAPS = False 
+if GENERATE_EXPERIMENTAL_ONLY:
+    OUTPUT_DIR = Path("./comparative_analysis_outputs_experimental_only")
+else:
+    OUTPUT_DIR = Path("./comparative_analysis_outputs")
+
+GENERATE_ATTENTION_MAPS = True 
+
+
 MODEL_PATH = "dna_r10.4.1_e8.2_400bps_sup@v5.2.0" 
 
 # ==========================================
@@ -117,7 +129,7 @@ def plot_all_components_combined(df, score_column, metric_type, plot_dir, filter
     
     plt.figure(figsize=(14, 8))
     ax = sns.lineplot(data=df, x='Layer', y=score_column, hue='Component', 
-                      style='Group', markers=True, dashes=True, errorbar=None)
+                      style='Group', markers=True, dashes=True)#, errorbar=None)
     
     plt.title(f'All Components Combined: {stat_type} of {score_column} across Layers\n({metric_type.upper()} | {filter_suffix.replace("_", " ")})', fontsize=14)
     plt.ylabel(f'{stat_type} Score')
@@ -289,7 +301,7 @@ def generate_attention_maps_for_first_read(model, clean_input_tensor, layer_idx=
     print("Attention map saved.")
 
 def load_tensor(read: int, row: int, csv_path: str, model):
-    reader = Reader(csv_path)
+    reader = Reader("./data/reads/")
 
     reads = reader.get_reads(
         csv_path, 
@@ -321,7 +333,13 @@ def load_tensor(read: int, row: int, csv_path: str, model):
 # 6. MAIN ORCHESTRATOR
 # ==========================================
 if __name__ == "__main__":
-    components = ["mlp", "attn", "layer"] + [f"head {h}" for h in range(8)]
+    if GENERATE_MLP_ATN_LAYER_ONLY:
+        components = ["mlp", "attn", "layer"]
+    elif GENERATE_HEADS_ONLY:
+        components = [f"head {h}" for h in range(8)]
+    else:
+        components = ["mlp", "attn", "layer"] + [f"head {h}" for h in range(8)]
+
     metric_types = ["noising", "denoising"]
     
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -333,7 +351,9 @@ if __name__ == "__main__":
         # 1. Load all components into one massive dataframe
         for comp in components:
             df_exp = load_data_from_dir(comp, metric, DIR_EXP, 'Experiment (Homopolymer)')
-            df_ctrl = load_data_from_dir(comp, metric, DIR_CTRL, 'Control (Single Error)')
+            df_ctrl = (load_data_from_dir(comp, metric, DIR_CTRL, 'Control (Single Error)')
+                        if GENERATE_EXPERIMENTAL_ONLY is False else None)
+            
             
             if df_exp is not None: all_components_raw_df_list.append(df_exp)
             if df_ctrl is not None: all_components_raw_df_list.append(df_ctrl)
@@ -348,7 +368,12 @@ if __name__ == "__main__":
         master_aie_df, master_max_df = preprocess_layerwise_metrics(combined_raw_df)
         
         # 3. Setup output directory
-        metric_plot_dir = OUTPUT_DIR / f"{metric}_combined_analysis"
+        if GENERATE_MLP_ATN_LAYER_ONLY:
+            metric_plot_dir = OUTPUT_DIR / f"{metric}_combined_analysis/MLP_atn_layer_analysis"
+        elif GENERATE_HEADS_ONLY:
+            metric_plot_dir = OUTPUT_DIR / f"{metric}_combined_analysis/heads_analysis"
+        else:
+            metric_plot_dir = OUTPUT_DIR / f"{metric}_combined_analysis"
         metric_plot_dir.mkdir(parents=True, exist_ok=True)
         
         # 4. Export Master Stats for both
@@ -356,16 +381,17 @@ if __name__ == "__main__":
         export_summary_stats(master_max_df, f"Master_{metric}", metric_plot_dir, stat_type="Max")
         
         # 5. ---> GENERATE INDIVIDUAL COMPONENT PLOTS & SUMMARY REPORTS <---
-        print("Generating individual component plots and summaries...")
-        for comp in components:
-            comp_aie_df = master_aie_df[master_aie_df['Component'] == comp]
-            comp_max_df = master_max_df[master_max_df['Component'] == comp]
-            
-            # Use the AIE dataframe to generate the summary text report once per component
-            if not comp_aie_df.empty:
-                generate_individual_plots_and_summary(comp_aie_df, comp, metric, metric_plot_dir, stat_type="AIE", generate_report=True)
-            if not comp_max_df.empty:
-                generate_individual_plots_and_summary(comp_max_df, comp, metric, metric_plot_dir, stat_type="Max", generate_report=False)
+        if not (GENERATE_MLP_ATN_LAYER_ONLY or GENERATE_HEADS_ONLY):
+            print("Generating individual component plots and summaries...")
+            for comp in components:
+                comp_aie_df = master_aie_df[master_aie_df['Component'] == comp]
+                comp_max_df = master_max_df[master_max_df['Component'] == comp]
+                
+                # Use the AIE dataframe to generate the summary text report once per component
+                if not comp_aie_df.empty:
+                    generate_individual_plots_and_summary(comp_aie_df, comp, metric, metric_plot_dir, stat_type="AIE", generate_report=True)
+                if not comp_max_df.empty:
+                    generate_individual_plots_and_summary(comp_max_df, comp, metric, metric_plot_dir, stat_type="Max", generate_report=False)
 
         # 6. Generate the All-Components Plot (Unfiltered)
         print("Generating combined plots...")

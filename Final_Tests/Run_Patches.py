@@ -136,7 +136,9 @@ def run_patching_sweep(model, source_input, target_input, check_output_timestamp
                     layer.self_attn.out_proj.input = patched 
 
                 elif component == "layer":
-                    model.encoder.transformer_encoder[layer_idx].output[0][start:end, :] = src_act[start:end, :]
+                    target = layer.output.clone()
+                    target[0][start:end, :] = src_act[start:end, :]
+                    layer.output=target
 
 
 
