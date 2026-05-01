@@ -19,7 +19,7 @@ DIR_EXP = Path("./patch_results")
 DIR_CTRL = Path("./patch_results_control")  
 OUTPUT_DIR = Path("./comparative_analysis_outputs")
 
-GENERATE_ATTENTION_MAPS = True 
+GENERATE_ATTENTION_MAPS = False 
 MODEL_PATH = "dna_r10.4.1_e8.2_400bps_sup@v5.2.0" 
 
 # ==========================================
@@ -117,7 +117,7 @@ def plot_all_components_combined(df, score_column, metric_type, plot_dir, filter
     
     plt.figure(figsize=(14, 8))
     ax = sns.lineplot(data=df, x='Layer', y=score_column, hue='Component', 
-                      style='Group', markers=True, dashes=True) ##, errorbar=('ci', 95)
+                      style='Group', markers=True, dashes=True, errorbar=None)
     
     plt.title(f'All Components Combined: {stat_type} of {score_column} across Layers\n({metric_type.upper()} | {filter_suffix.replace("_", " ")})', fontsize=14)
     plt.ylabel(f'{stat_type} Score')
@@ -326,54 +326,54 @@ if __name__ == "__main__":
     
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # for metric in metric_types:
-    #     print(f"\n--- Processing Metric: {metric.upper()} ---")
-    #     all_components_raw_df_list = []
+    for metric in metric_types:
+        print(f"\n--- Processing Metric: {metric.upper()} ---")
+        all_components_raw_df_list = []
         
-    #     # 1. Load all components into one massive dataframe
-    #     for comp in components:
-    #         df_exp = load_data_from_dir(comp, metric, DIR_EXP, 'Experiment (Homopolymer)')
-    #         df_ctrl = load_data_from_dir(comp, metric, DIR_CTRL, 'Control (Single Error)')
+        # 1. Load all components into one massive dataframe
+        for comp in components:
+            df_exp = load_data_from_dir(comp, metric, DIR_EXP, 'Experiment (Homopolymer)')
+            df_ctrl = load_data_from_dir(comp, metric, DIR_CTRL, 'Control (Single Error)')
             
-    #         if df_exp is not None: all_components_raw_df_list.append(df_exp)
-    #         if df_ctrl is not None: all_components_raw_df_list.append(df_ctrl)
+            if df_exp is not None: all_components_raw_df_list.append(df_exp)
+            if df_ctrl is not None: all_components_raw_df_list.append(df_ctrl)
             
-    #     if not all_components_raw_df_list:
-    #         print(f"No data found for {metric}.")
-    #         continue
+        if not all_components_raw_df_list:
+            print(f"No data found for {metric}.")
+            continue
             
-    #     combined_raw_df = pd.concat(all_components_raw_df_list, ignore_index=True)
+        combined_raw_df = pd.concat(all_components_raw_df_list, ignore_index=True)
         
-    #     # 2. Calculate both AIE (Mean) and Max metrics
-    #     master_aie_df, master_max_df = preprocess_layerwise_metrics(combined_raw_df)
+        # 2. Calculate both AIE (Mean) and Max metrics
+        master_aie_df, master_max_df = preprocess_layerwise_metrics(combined_raw_df)
         
-    #     # 3. Setup output directory
-    #     metric_plot_dir = OUTPUT_DIR / f"{metric}_combined_analysis"
-    #     metric_plot_dir.mkdir(parents=True, exist_ok=True)
+        # 3. Setup output directory
+        metric_plot_dir = OUTPUT_DIR / f"{metric}_combined_analysis"
+        metric_plot_dir.mkdir(parents=True, exist_ok=True)
         
-    #     # 4. Export Master Stats for both
-    #     export_summary_stats(master_aie_df, f"Master_{metric}", metric_plot_dir, stat_type="AIE")
-    #     export_summary_stats(master_max_df, f"Master_{metric}", metric_plot_dir, stat_type="Max")
+        # 4. Export Master Stats for both
+        export_summary_stats(master_aie_df, f"Master_{metric}", metric_plot_dir, stat_type="AIE")
+        export_summary_stats(master_max_df, f"Master_{metric}", metric_plot_dir, stat_type="Max")
         
-    #     # 5. ---> GENERATE INDIVIDUAL COMPONENT PLOTS & SUMMARY REPORTS <---
-    #     print("Generating individual component plots and summaries...")
-    #     for comp in components:
-    #         comp_aie_df = master_aie_df[master_aie_df['Component'] == comp]
-    #         comp_max_df = master_max_df[master_max_df['Component'] == comp]
+        # 5. ---> GENERATE INDIVIDUAL COMPONENT PLOTS & SUMMARY REPORTS <---
+        print("Generating individual component plots and summaries...")
+        for comp in components:
+            comp_aie_df = master_aie_df[master_aie_df['Component'] == comp]
+            comp_max_df = master_max_df[master_max_df['Component'] == comp]
             
-    #         # Use the AIE dataframe to generate the summary text report once per component
-    #         if not comp_aie_df.empty:
-    #             generate_individual_plots_and_summary(comp_aie_df, comp, metric, metric_plot_dir, stat_type="AIE", generate_report=True)
-    #         if not comp_max_df.empty:
-    #             generate_individual_plots_and_summary(comp_max_df, comp, metric, metric_plot_dir, stat_type="Max", generate_report=False)
+            # Use the AIE dataframe to generate the summary text report once per component
+            if not comp_aie_df.empty:
+                generate_individual_plots_and_summary(comp_aie_df, comp, metric, metric_plot_dir, stat_type="AIE", generate_report=True)
+            if not comp_max_df.empty:
+                generate_individual_plots_and_summary(comp_max_df, comp, metric, metric_plot_dir, stat_type="Max", generate_report=False)
 
-    #     # 6. Generate the All-Components Plot (Unfiltered)
-    #     print("Generating combined plots...")
-    #     filter_and_plot_combined(master_aie_df, master_max_df, metric, metric_plot_dir)
+        # 6. Generate the All-Components Plot (Unfiltered)
+        print("Generating combined plots...")
+        filter_and_plot_combined(master_aie_df, master_max_df, metric, metric_plot_dir)
         
-    #     # 7. Generate Filtered Plots
-    #     filter_and_plot_combined(master_aie_df, master_max_df, metric, metric_plot_dir, base_type='A')
-    #     filter_and_plot_combined(master_aie_df, master_max_df, metric, metric_plot_dir, min_length=6)
+        # 7. Generate Filtered Plots
+        filter_and_plot_combined(master_aie_df, master_max_df, metric, metric_plot_dir, base_type='A')
+        filter_and_plot_combined(master_aie_df, master_max_df, metric, metric_plot_dir, min_length=6)
 
     # Optional Attention Maps
     if GENERATE_ATTENTION_MAPS:

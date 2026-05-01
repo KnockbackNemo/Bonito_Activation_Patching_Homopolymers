@@ -220,9 +220,9 @@ def run_patching_sweep(model, source_input, target_input, check_output_timestamp
                 global_mse_diff = torch.nn.functional.mse_loss(source_output.to(torch.float32), patched_scores.to(torch.float32)).item()
                 should_decode = not is_target_logit_argmax or not is_target_prob_argmax or (global_mse_diff > global_mse_baseline_diff)
 
-                # string = None
+                string = None
                 # if should_decode:
-                string = bonito_model.decode(patched_scores[:, 0, :])
+                # string = bonito_model.decode(patched_scores[:, 0, :])
                 
                 #### Save everything to a dictionary
                 results.append({
@@ -379,7 +379,7 @@ def check_if_run_exists(file_name, read_idx, row_idx, component, timestamps):
     it won't run again, so you may need to be careful about missing timesteps. '''
     folder_path = f"patch_results_control/{file_name}/read_{read_idx}/row_{row_idx}"
     found_at_least_one_timestep = False
-    for step in timestamps:
+    for step in timestamps: ## Todo currently doesn't include -1
         csv_filename = f"R{read_idx}r{row_idx}_{component}_data_step_{step}.csv"
         csv_full_path = os.path.join(folder_path, csv_filename)
         if os.path.exists(csv_full_path):
@@ -530,10 +530,11 @@ for current_read_idx, read_data in enumerate(reads, start=1):
         print(f"Corrupted string: {string_corrupted}")
 
         max_time_idx = clean_output.shape[0]
-        score_window_start_idx = min(base_to_output_idx_guess(h_recorded_begin_idx), clean_output.shape[0] - 1) # We just take a guess at where to patch- we'll look at the brightest spot in this area
+        OUTPUT_BUFFER = 3
+        score_window_start_idx = 0 #max(0, base_to_output_idx_guess(h_recorded_begin_idx) - 3) # We just take a guess at where to patch- we'll look at the brightest spot in this area
         
-        raw_end_guess = base_to_output_idx_guess(h_recorded_begin_idx + max(clean_recorded_hmer_len, corrupt_recorded_hmer_len))
-        score_window_end_idx = min(raw_end_guess, max_time_idx)
+        raw_end_guess = base_to_output_idx_guess(h_recorded_begin_idx + max(clean_recorded_hmer_len, corrupt_recorded_hmer_len) + OUTPUT_BUFFER)
+        score_window_end_idx = max_time_idx#min(raw_end_guess, max_time_idx)
         
         # Run sweep of all layers using a timestep of 1
         NUM_T_LAYERS = 18
@@ -575,15 +576,14 @@ for current_read_idx, read_data in enumerate(reads, start=1):
             print(f"Skipping attn_denoising for Read {current_read_idx} Row {index}: Files already exist")
  
 
-        head_recoveries = []
         NUM_HEADS = 8
         for h in range(NUM_HEADS):
             # print(f"Sweeping head {h} denoising...")
             if not check_if_run_exists(file_name, current_read_idx, index, f"head {h} denoising", timestamps_to_score):
 
-                head_recoveries.append(run_patching_sweep(model, clean_input, corrupted_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
-                    PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="head", head_idx=h, metric_mode="recovery"))
-                plot_and_save_outputs(head_recoveries[h], component=f"head {h} denoising", folder_name=current_read_idx, index=index)
+                head_recovery = run_patching_sweep(model, clean_input, corrupted_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX,
+                    PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="head", head_idx=h, metric_mode="recovery")
+                plot_and_save_outputs(head_recovery, component=f"head {h} denoising", folder_name=current_read_idx, index=index)
             else:
                 print(f"Skipping head {h} denoising for Read {current_read_idx} Row {index}: Files already exist")
  
@@ -613,15 +613,14 @@ for current_read_idx, read_data in enumerate(reads, start=1):
             print(f"Skipping attn_noising for Read {current_read_idx} Row {index}: Files already exist")
  
 
-        head_degradations = []
         NUM_HEADS = 8
         for h in range(NUM_HEADS):
             # print(f"Sweeping head {h} noising...")
             if not check_if_run_exists(file_name, current_read_idx, index, f"head {h} noising", timestamps_to_score):
 
-                head_degradations.append(run_patching_sweep(model, corrupted_input, clean_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
-                    PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="head", head_idx=h, metric_mode="degradation"))
-                plot_and_save_outputs(head_degradations[h], component=f"head {h} noising", folder_name=current_read_idx, index=index)
+                head_degradation = run_patching_sweep(model, corrupted_input, clean_input, timestamps_to_score, PATCHING_SWEEP_WINDOW_START_IDX, 
+                    PATCHING_SWEEP_WINDOW_END_IDX, NUM_T_LAYERS, component="head", head_idx=h, metric_mode="degradation")
+                plot_and_save_outputs(head_degradation, component=f"head {h} noising", folder_name=current_read_idx, index=index)
             else:
                 print(f"Skipping head {h} noising for Read {current_read_idx} Row {index}: Files already exist")
  
