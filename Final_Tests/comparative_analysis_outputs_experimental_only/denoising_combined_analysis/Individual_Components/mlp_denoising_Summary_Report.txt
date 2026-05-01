@@ -1,0 +1,34 @@
+=== SUMMARY REPORT: MLP | DENOISING ===
+Total Unique Reads: 35
+
+--- Group: Experiment (Homopolymer) ---
+Reads in Group: 35
+
+Base Letter Breakdown:
+Base Letter
+C          12
+A          10
+G           8
+Unknown     4
+T           1
+
+Error Type Breakdown:
+Error Type
+Deletion     17
+Insertion    14
+Unknown       4
+
+Clean H-er Length Breakdown:
+Clean H-er Length
+5.0     16
+4.0      7
+NaN      4
+9.0      2
+1.0      2
+7.0      1
+6.0      1
+3.0      1
+10.0     1
+
+----------------------------------------
+

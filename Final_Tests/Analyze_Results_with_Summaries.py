@@ -15,10 +15,10 @@ import torch
 sns.set_context("paper", font_scale=1.2)
 sns.set_style("whitegrid")
 
-## My customization
-GENERATE_EXPERIMENTAL_ONLY = False
-GENERATE_MLP_ATN_LAYER_ONLY = False
-GENERATE_HEADS_ONLY = True
+## My customization #FFF, FTF, FFT, TFF, TFT, TTF
+GENERATE_EXPERIMENTAL_ONLY = True 
+GENERATE_MLP_ATN_ONLY = True
+GENERATE_HEADS_ONLY = False
 
 
 DIR_EXP = Path("./patch_results")           
@@ -29,7 +29,7 @@ if GENERATE_EXPERIMENTAL_ONLY:
 else:
     OUTPUT_DIR = Path("./comparative_analysis_outputs")
 
-GENERATE_ATTENTION_MAPS = True 
+GENERATE_ATTENTION_MAPS = False 
 
 
 MODEL_PATH = "dna_r10.4.1_e8.2_400bps_sup@v5.2.0" 
@@ -80,7 +80,7 @@ def load_data_from_dir(component_name, metric_type, data_dir, group_label): ## T
                     # use slightly different formatting (e.g. 'Base Letter' vs 'Base_Letter')
                     temp_df['Base Letter'] = meta_row.get('Base_Letter', meta_row.get('Base Letter', 'Unknown'))
                     temp_df['Clean H-er Length'] = meta_row.get('Clean_Length', meta_row.get('Clean H-er Length', np.nan))
-                    temp_df['Error Type'] = meta_row.get('Error_Type', meta_row.get('Error Type', 'Unknown'))
+                    temp_df['Error Type'] = meta_row.get('Error Type', meta_row.get('Type', 'Unknown'))
                 else:
                     temp_df['Base Letter'] = 'Unknown'
                     temp_df['Clean H-er Length'] = np.nan
@@ -129,7 +129,7 @@ def plot_all_components_combined(df, score_column, metric_type, plot_dir, filter
     
     plt.figure(figsize=(14, 8))
     ax = sns.lineplot(data=df, x='Layer', y=score_column, hue='Component', 
-                      style='Group', markers=True, dashes=True)#, errorbar=None)
+                      style='Group', markers=True, dashes={'Experiment (Homopolymer)': '', 'Control (Single Error)': (4, 4)}, errorbar=None)
     
     plt.title(f'All Components Combined: {stat_type} of {score_column} across Layers\n({metric_type.upper()} | {filter_suffix.replace("_", " ")})', fontsize=14)
     plt.ylabel(f'{stat_type} Score')
@@ -175,7 +175,7 @@ def generate_summary_report(df, component_name, metric_type, plot_dir):
 def plot_individual_comparative_line(df, score_column, component_name, metric_type, plot_dir, stat_type):
     plt.figure(figsize=(10, 6))
     ax = sns.lineplot(data=df, x='Layer', y=score_column, hue='Group', 
-                      style='Group', markers=True, dashes=True, errorbar=('ci', 95))
+                      style='Group', markers=True, dashes={'Experiment (Homopolymer)': '', 'Control (Single Error)': (4, 4)}, errorbar=('ci', 95))
     plt.title(f'{stat_type} {score_column} across Layers\n({component_name.upper()} | {metric_type.upper()})', fontsize=14)
     plt.ylabel(f'{stat_type} Score')
     plt.xlabel('Layer Index')
@@ -214,7 +214,7 @@ def generate_individual_plots_and_summary(df, component_name, metric_type, base_
     if generate_report:
         generate_summary_report(df, component_name, metric_type, plot_dir)
     
-    for score in ['Logit_Score', 'Posteriors_Score']:
+    for score in ['Logit_Score']:#, 'Posteriors_Score']:
         plot_individual_comparative_line(df, score, component_name, metric_type, plot_dir, stat_type)
         plot_individual_comparative_bar(df, score, component_name, metric_type, plot_dir, stat_type)
         plot_individual_distribution_violin(df, score, component_name, metric_type, plot_dir, stat_type)
@@ -228,22 +228,22 @@ def filter_and_plot_combined(df_aie, df_max, metric_type, plot_dir, base_type=No
     filter_tags = []
     
     if base_type:
-        filtered_aie = filtered_aie[filtered_aie['Base Letter'] == base_type]
+        # filtered_aie = filtered_aie[filtered_aie['Base Letter'] == base_type]
         filtered_max = filtered_max[filtered_max['Base Letter'] == base_type]
         filter_tags.append(f"Base_{base_type}")
         
     if min_length is not None:
-        filtered_aie = filtered_aie[filtered_aie['Clean H-er Length'] >= min_length]
+        # filtered_aie = filtered_aie[filtered_aie['Clean H-er Length'] >= min_length]
         filtered_max = filtered_max[filtered_max['Clean H-er Length'] >= min_length]
         filter_tags.append(f"MinLen_{min_length}")
         
     if max_length is not None:
-        filtered_aie = filtered_aie[filtered_aie['Clean H-er Length'] <= max_length]
+        # filtered_aie = filtered_aie[filtered_aie['Clean H-er Length'] <= max_length]
         filtered_max = filtered_max[filtered_max['Clean H-er Length'] <= max_length]
         filter_tags.append(f"MaxLen_{max_length}")
         
     if error_type:
-        filtered_aie = filtered_aie[filtered_aie['Error Type'] == error_type]
+        # filtered_aie = filtered_aie[filtered_aie['Error Type'] == error_type]
         filtered_max = filtered_max[filtered_max['Error Type'] == error_type]
         filter_tags.append(f"Error_{error_type}")
         
@@ -253,8 +253,8 @@ def filter_and_plot_combined(df_aie, df_max, metric_type, plot_dir, base_type=No
         
     suffix = "_".join(filter_tags) if filter_tags else "All_Data"
     
-    for score in ['Logit_Score', 'Posteriors_Score']:
-        plot_all_components_combined(filtered_aie, score, metric_type, plot_dir, filter_suffix=suffix, stat_type="AIE")
+    for score in ['Logit_Score']:#, 'Posteriors_Score']:
+        # plot_all_components_combined(filtered_aie, score, metric_type, plot_dir, filter_suffix=suffix, stat_type="AIE")
         plot_all_components_combined(filtered_max, score, metric_type, plot_dir, filter_suffix=suffix, stat_type="Max")
         
     print(f"📊 Generated combined AIE and Max plots for: {suffix}")
@@ -268,12 +268,15 @@ def generate_attention_maps_for_first_read(model, clean_input_tensor, layer_idx=
     head_dim = d_model // n_heads
     
     with model.trace(clean_input_tensor):
-        attn_module = model.encoder.transformer_encoder.layers[layer_idx].self_attn
+        attn_module = model.encoder.transformer_encoder[layer_idx].self_attn
         hidden_states = attn_module.input[0][0].save() 
 
-    x = hidden_states.value 
-    if x.shape[0] != 1: x = x.transpose(0, 1) 
-    x = x[0] 
+    x = hidden_states 
+    while isinstance(x, (tuple, list)):
+        x = x[0] 
+        
+    # 2. Force it into [seq_len, d_model] regardless of where the batch dimension was
+    x = x.view(-1, 512) 
     
     in_proj_weight = attn_module.in_proj_weight.detach().cpu()
     in_proj_bias = attn_module.in_proj_bias.detach().cpu() if attn_module.in_proj_bias is not None else 0
@@ -300,20 +303,31 @@ def generate_attention_maps_for_first_read(model, clean_input_tensor, layer_idx=
     plt.close()
     print("Attention map saved.")
 
-def load_tensor(read: int, row: int, csv_path: str, model):
-    reader = Reader("./data/reads/")
+def load_tensor(read_idx: int, row_idx: int, csv_path: str, model):
+    data_dir = "./data/reads/"
+    reader = Reader(data_dir)
 
     reads = reader.get_reads(
-        csv_path, 
+        data_dir, 
         do_trim=True,
         scaling_strategy=model.config.get("scaling"),
         norm_params=model.config.get("standardisation")
     )
 
-    df_inputpairs = pd.read_csv(csv_path)
+    df_metadata = pd.read_csv(csv_path)
+
+    if row_idx >= len(df_metadata):
+        raise ValueError(f"Row index {row_idx} out of range for metadata CSV.")
+
+    row = df_metadata.iloc[row_idx]
+
+    read_data = None
     
-    for i in range(0, read):
-        read_data = next(reader.reads()) 
+    for i in range(read_idx):
+        read_data = next(reads) 
+
+    if read_data is None:
+        raise ValueError("read_idx must be >= 1 to fetch a read.")
     
     raw_stndrd_signal = read_data.signal
 
@@ -333,8 +347,8 @@ def load_tensor(read: int, row: int, csv_path: str, model):
 # 6. MAIN ORCHESTRATOR
 # ==========================================
 if __name__ == "__main__":
-    if GENERATE_MLP_ATN_LAYER_ONLY:
-        components = ["mlp", "attn", "layer"]
+    if GENERATE_MLP_ATN_ONLY:
+        components = ["mlp", "attn"]
     elif GENERATE_HEADS_ONLY:
         components = [f"head {h}" for h in range(8)]
     else:
@@ -368,7 +382,7 @@ if __name__ == "__main__":
         master_aie_df, master_max_df = preprocess_layerwise_metrics(combined_raw_df)
         
         # 3. Setup output directory
-        if GENERATE_MLP_ATN_LAYER_ONLY:
+        if GENERATE_MLP_ATN_ONLY:
             metric_plot_dir = OUTPUT_DIR / f"{metric}_combined_analysis/MLP_atn_layer_analysis"
         elif GENERATE_HEADS_ONLY:
             metric_plot_dir = OUTPUT_DIR / f"{metric}_combined_analysis/heads_analysis"
@@ -381,25 +395,31 @@ if __name__ == "__main__":
         export_summary_stats(master_max_df, f"Master_{metric}", metric_plot_dir, stat_type="Max")
         
         # 5. ---> GENERATE INDIVIDUAL COMPONENT PLOTS & SUMMARY REPORTS <---
-        if not (GENERATE_MLP_ATN_LAYER_ONLY or GENERATE_HEADS_ONLY):
+        if not (GENERATE_MLP_ATN_ONLY or GENERATE_HEADS_ONLY):
             print("Generating individual component plots and summaries...")
             for comp in components:
                 comp_aie_df = master_aie_df[master_aie_df['Component'] == comp]
                 comp_max_df = master_max_df[master_max_df['Component'] == comp]
                 
                 # Use the AIE dataframe to generate the summary text report once per component
-                if not comp_aie_df.empty:
-                    generate_individual_plots_and_summary(comp_aie_df, comp, metric, metric_plot_dir, stat_type="AIE", generate_report=True)
+                # if not comp_aie_df.empty:
+                    # generate_individual_plots_and_summary(comp_aie_df, comp, metric, metric_plot_dir, stat_type="AIE", generate_report=True)
                 if not comp_max_df.empty:
-                    generate_individual_plots_and_summary(comp_max_df, comp, metric, metric_plot_dir, stat_type="Max", generate_report=False)
+                    generate_individual_plots_and_summary(comp_max_df, comp, metric, metric_plot_dir, stat_type="Max", generate_report=True)
 
         # 6. Generate the All-Components Plot (Unfiltered)
         print("Generating combined plots...")
         filter_and_plot_combined(master_aie_df, master_max_df, metric, metric_plot_dir)
         
         # 7. Generate Filtered Plots
+        filter_and_plot_combined(master_aie_df, master_max_df, metric, metric_plot_dir, base_type='C')
+        filter_and_plot_combined(master_aie_df, master_max_df, metric, metric_plot_dir, base_type='G')
         filter_and_plot_combined(master_aie_df, master_max_df, metric, metric_plot_dir, base_type='A')
+        filter_and_plot_combined(master_aie_df, master_max_df, metric, metric_plot_dir, base_type='T')
         filter_and_plot_combined(master_aie_df, master_max_df, metric, metric_plot_dir, min_length=6)
+        filter_and_plot_combined(master_aie_df, master_max_df, metric, metric_plot_dir, max_length=5)
+        filter_and_plot_combined(master_aie_df, master_max_df, metric, metric_plot_dir, error_type='Insertion')
+        filter_and_plot_combined(master_aie_df, master_max_df, metric, metric_plot_dir, error_type='Deletion')
 
     # Optional Attention Maps
     if GENERATE_ATTENTION_MAPS:
@@ -412,5 +432,5 @@ if __name__ == "__main__":
         
         csv_path = "./data/pairs/Input_gen_results_read_1.csv"
         # Load the dummy input using the updated load_tensor function
-        dummy_input = load_tensor(read=1, row=0, csv_path=csv_path, model=bonito_model) 
+        dummy_input = load_tensor(read_idx=1, row_idx=0, csv_path=csv_path, model=nnsight_model) 
         generate_attention_maps_for_first_read(nnsight_model, dummy_input, layer_idx=16, head_idx=5)

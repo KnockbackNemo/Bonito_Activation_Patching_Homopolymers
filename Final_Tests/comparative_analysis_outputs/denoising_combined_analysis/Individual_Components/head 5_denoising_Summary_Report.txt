@@ -1,55 +1,61 @@
 === SUMMARY REPORT: HEAD 5 | DENOISING ===
-Total Unique Reads: 33
+Total Unique Reads: 38
 
 --- Group: Control (Single Error) ---
-Reads in Group: 11
+Reads in Group: 14
 
 Base Letter Breakdown:
 Base Letter
 A          7
+Unknown    3
+G          2
 C          1
 T          1
-Unknown    1
-G          1
 
 Error Type Breakdown:
 Error Type
-Unknown    11
+Deletion     8
+Insertion    3
+Unknown      3
 
 Clean H-er Length Breakdown:
 Clean H-er Length
-5.0    5
+5.0    6
+NaN    3
 9.0    2
 4.0    2
 7.0    1
-NaN    1
 
 ----------------------------------------
 
 --- Group: Experiment (Homopolymer) ---
-Reads in Group: 32
+Reads in Group: 35
 
 Base Letter Breakdown:
 Base Letter
-C    15
-A     8
-G     8
-T     1
+C          12
+A          10
+G           8
+Unknown     4
+T           1
 
 Error Type Breakdown:
 Error Type
-Unknown    32
+Deletion     17
+Insertion    14
+Unknown       4
 
 Clean H-er Length Breakdown:
 Clean H-er Length
-5.0    17
-4.0     5
-1.0     4
-9.0     2
-7.0     1
-6.0     1
-3.0     1
-2.0     1
+5.0     16
+4.0      7
+NaN      4
+9.0      2
+1.0      2
+7.0      1
+6.0      1
+3.0      1
+10.0     1
 
 ----------------------------------------
 
