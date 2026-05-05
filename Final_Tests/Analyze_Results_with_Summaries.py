@@ -17,8 +17,8 @@ sns.set_style("whitegrid")
 
 ## My customization #FFF, FTF, FFT, TFF, TFT, TTF
 GENERATE_EXPERIMENTAL_ONLY = True 
-GENERATE_MLP_ATN_ONLY = True
-GENERATE_HEADS_ONLY = False
+GENERATE_MLP_ATN_ONLY = False
+GENERATE_HEADS_ONLY = True
 
 
 DIR_EXP = Path("./patch_results")           
