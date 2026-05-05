@@ -1,3 +1,0 @@
-clean base,corrupt base,num_bases,duration_viterbi,raw start idx,raw end idx,input_base_timestamps,Dampen width,Scale Factor,Clean string,Corrupt_string,H Begin Idx,Clean H-er Length,Corrupt H-er Length,Type,Corruption Start Raw,Corruption End Raw,Noise source idx,Insert idx
-A,G,[1],2,6586,6598,[6586],1.0,0.1,CCGCCACGCGGACACACCTGCCAA,CCGCCACGCGGACACGCCTGCCAA,15,1,0,Negative_Control,6586,6598,,
-C,T,[1],1,14938,14944,[14938],1.0,0.1,AAGCCCAACGCTCCCCGCCCGCGGCGGCCGCCGACT,AAGCCCAACGCTCCCCGCCCGCGGTGGCCGCCGACT,24,1,0,Negative_Control,14938,14944,,

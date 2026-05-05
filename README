@@ -1,0 +1,26 @@
+## Overview ##
+
+This repo contains the code and data used in the engineering undergraduate thesis "An Exploration of the Oxford Nanopore Technoologies Bonito Model Through Activation Patching on Homopolymer Reads," which can be read here:
+https://drive.google.com/file/d/1cqdEWf3xB1rUcSQ5CsdD_FrkICirZYSM/view
+
+This includes
+- Scripts
+- Input data
+- Experimental results and intermediate data
+
+## How to use this repo ##
+
+The graphs and data produced in this experiment are already present in the repo and can be viewed without running additional scripts.
+
+If you want to look at data, see
+- *Data* for input reads
+
+If you want to look at results graphs and csvs, see
+- *comparative_analysis_outputs* for a comparison of homopolymer vs non-homopolymer error results
+- *comparative_analysis_outputs_experimental_only* to see only the homopolymer runs (can be easier to compare components)
+- Within each of these folders, you can find a breakdown of results by denoising/noising in the *denoising_combined_analysis* and *noising_combined_analysis* folders
+    - Combined graphs and stats are within these folders, and additional selections of component comparisons can be found in *heads_analysis*, *Individual_Components*, and *MLP_atn_layer_analysis* for less busy visuals
+
+If you want to look at intermediate scripts and outputs, see
+1. find_kmers.py for finding homopolymer regions
+2. 
