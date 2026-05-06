@@ -1,3 +1,5 @@
+""" Aggregate activation patching results and create figures and summaries."""
+
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -15,19 +17,19 @@ import torch
 sns.set_context("paper", font_scale=1.2)
 sns.set_style("whitegrid")
 
-## My customization #FFF, FTF, FFT, TFF, TFT, TTF
-GENERATE_EXPERIMENTAL_ONLY = True 
+## My customization combinations used #FFF, FTF, FFT, TFF, TFT, TTF
+GENERATE_EXPERIMENTAL_ONLY = True # True to skip plotting comparison (nonhomopolymer) data
 GENERATE_MLP_ATN_ONLY = False
 GENERATE_HEADS_ONLY = True
 
 
-DIR_EXP = Path("./patch_results")           
-DIR_CTRL = Path("./patch_results_control")  
+DIR_EXP = Path("./Results_and_Figures/Patching/Homopolymer")
+DIR_CTRL = Path("./Results_and_Figures/Patching/Nonhomopolymer")
 
 if GENERATE_EXPERIMENTAL_ONLY:
-    OUTPUT_DIR = Path("./comparative_analysis_outputs_experimental_only")
+    OUTPUT_DIR = Path("./Results_and_Figures/comparative_analysis_outputs_experimental_only")
 else:
-    OUTPUT_DIR = Path("./comparative_analysis_outputs")
+    OUTPUT_DIR = Path("./Results_and_Figures/comparative_analysis_outputs")
 
 GENERATE_ATTENTION_MAPS = False 
 
@@ -67,7 +69,7 @@ def load_data_from_dir(component_name, metric_type, data_dir, group_label): ## T
             
             # ---> METADATA RE-INTEGRATION <---
             # Note: Adjust this path if your metadata CSVs are stored elsewhere!
-            meta_csv_path = Path(f"./data/pairs/Input_gen_results_read_{read_num}.csv")
+            meta_csv_path = Path(f"./Intermediate_Data/clean_corrupt_pairs/selected/Homopolymer/Input_gen_results_read_{read_num}.csv")
             
             if meta_csv_path.exists():
                 meta_df = pd.read_csv(meta_csv_path)
@@ -304,7 +306,7 @@ def generate_attention_maps_for_first_read(model, clean_input_tensor, layer_idx=
     print("Attention map saved.")
 
 def load_tensor(read_idx: int, row_idx: int, csv_path: str, model):
-    data_dir = "./data/reads/"
+    data_dir = "./reads/"
     reader = Reader(data_dir)
 
     reads = reader.get_reads(
@@ -430,7 +432,7 @@ if __name__ == "__main__":
         bonito_model = util.load_model(MODEL_PATH, device="cuda" if torch.cuda.is_available() else "cpu")
         nnsight_model = NNsight(bonito_model._orig_mod)
         
-        csv_path = "./data/pairs/Input_gen_results_read_1.csv"
+        csv_path = "./Intermediate_Data/clean_corrupt_pairs/selected/Homopolymer/Input_gen_results_read_1.csv"
         # Load the dummy input using the updated load_tensor function
         dummy_input = load_tensor(read_idx=1, row_idx=0, csv_path=csv_path, model=nnsight_model) 
         generate_attention_maps_for_first_read(nnsight_model, dummy_input, layer_idx=16, head_idx=5)
