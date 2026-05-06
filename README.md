@@ -33,7 +33,7 @@ If you want to look at intermediate scripts or rerun the whole process, the orde
 
 1. Run find_kmers.py to find homopolymer regions.
     - There are 10 reads in the /reads/....pod5 file. Change READ_NUM at the top to search through different ones (the experiment uses reads 1-8).
-    - This producses csvs in the kmers_data_reads folder
+    - This produces csvs in the kmers_data_reads folder
 
 2. Run Test_Inputs to generate input pairs.
     - This applies various corruptions to the signals listed in kmers csvs to create clean/corrupt input pairs (added to Intermediate_Data/clean_corrupt_pairs/all/Homopolymer)
