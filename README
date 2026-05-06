@@ -10,6 +10,12 @@ This includes
 
 ## How to use this repo ##
 
+# Setup notes #
+
+This experiment was run in WSL on an Ubuntu 20.04 distro within a Python 3.12 conda environment.
+
+# Current contents #
+
 The graphs and data produced in this experiment are already present in the repo and can be viewed without running additional scripts.
 
 If you want to look at data, see
@@ -21,6 +27,7 @@ If you want to look at results graphs and csvs, see
 - Within each of these folders, you can find a breakdown of results by denoising/noising in the *denoising_combined_analysis* and *noising_combined_analysis* folders
     - Combined graphs and stats are within these folders, and additional selections of component comparisons can be found in *heads_analysis*, *Individual_Components*, and *MLP_atn_layer_analysis* for less busy visuals
 
+# Rerunning the experiment #
 If you want to look at intermediate scripts or rerun the whole process, the order is
 1. Run find_kmers.py to find homopolymer regions.
     - There are 10 reads in the /reads/....pod5 file. Change READ_NUM at the top to search through different ones (the experiment uses reads 1-8).
